@@ -10,11 +10,15 @@ logs/
 
 # Python
 __pycache__/
+*.pyc
 app.db
 app/**/__pycache__/
 app/translations/**/*.mo
 migrations/**/__pycache__/
 venv/
+
+# Node.js
+node_modules/
 
 # Terraform
 *.tfvars
@@ -24,6 +28,9 @@ terraform.tfstate.backup
 .terraform.lock.hcl
 .terraform.tfstate.lock.info
 *.env
+
+# Environment Files
+.env
 
 # Ignore all migration files
 **/migrations/*.py
