@@ -1,45 +1,22 @@
-services:
-  db:
-    image: postgres:14
-    environment:
-      - POSTGRES_DB=${DB_NAME}
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+version: '3.8'
 
+services:
   backend:
-    build: 
-      context: ..
-      dockerfile: Dockerfile.backend
+    image: <backend image tagged for dockerhub>:latest
     environment:
-      - DEBUG=1
-      - DB_NAME=${DB_NAME}
-      - DB_HOST=${DB_HOST}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_PORT=${DB_PORT}
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - ../backend:/app
-      - static_volume:/app/static
+      - DB_HOST=${rds_endpoint}
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
     command: >
-      bash -c "
-        # Commands as before, no hardcoded credentials
-      "
+          sh -c "python manage.py migrate &&
+                python manage.py dumpdata --database=sqlite --natural-foreign --natural-primary -e contenttypes -e auth.Permission --indent 4 > datadump.json &&
+                python manage.py loaddata datadump.json &&
+                rm -f db.sqlite3 &&
+                python manage.py runserver 0.0.0.0:8000"
 
-volumes:
-  postgres_data:
-  static_volume:
+  frontend:
+    image: <frontend image tagged for dockerhub>:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
