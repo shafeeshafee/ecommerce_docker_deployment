@@ -12,11 +12,11 @@ variable "dockerhub_password" {
 variable "db_username" {
   description = "Username for the RDS database"
   type        = string
-  default     = "ecommerce_admin"
+  default     = "kurac5user"
 }
 
 variable "db_password" {
-  description = "Password for the RDS database"
+  description = "Password for the RDS database (must be at least 8 characters)"
   type        = string
   sensitive   = true
 }
@@ -26,7 +26,7 @@ variable "key_name" {
   type        = string
 }
 
-# Optional: Add more variables as needed for customization
+# Note: we can add more variables as needed for customization
 variable "environment" {
   description = "Environment name (e.g., dev, staging, prod)"
   type        = string
