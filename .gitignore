@@ -6,6 +6,7 @@ logs/
 
 # For local testing
 *compose.local.yml
+*datadump.json
 
 # Python
 __pycache__/
@@ -23,3 +24,7 @@ terraform.tfstate.backup
 .terraform.lock.hcl
 .terraform.tfstate.lock.info
 *.env
+
+# Ignore all migration files
+**/migrations/*.py
+!**/migrations/__init__.py  # Keep the __init__.py files
