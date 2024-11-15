@@ -4,6 +4,9 @@ config.env
 *.key
 logs/
 
+# For local testing
+*compose.local.yml
+
 # Python
 __pycache__/
 app.db
