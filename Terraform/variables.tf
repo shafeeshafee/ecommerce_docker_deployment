@@ -1,11 +1,3 @@
-# variables.tf
-
-variable "aws_region" {
-  description = "AWS region to deploy resources"
-  type        = string
-  default     = "us-east-1"
-}
-
 variable "dockerhub_username" {
   description = "DockerHub username for pulling container images"
   type        = string
@@ -34,6 +26,7 @@ variable "key_name" {
   type        = string
 }
 
+# Note: we can add more variables as needed for customization
 variable "environment" {
   description = "Environment name (e.g., dev, staging, prod)"
   type        = string
