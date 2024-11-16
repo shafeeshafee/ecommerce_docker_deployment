@@ -409,15 +409,15 @@ resource "aws_instance" "app_az1" {
   vpc_security_group_ids = [aws_security_group.app.id]
 
   user_data = base64encode(templatefile("${path.module}/deploy.sh", {
-    rds_endpoint = aws_db_instance.main.endpoint
-    db_username  = var.db_username
-    db_password  = var.db_password
-    docker_user  = var.dockerhub_username
-    docker_pass  = var.dockerhub_password
+    rds_address = aws_db_instance.main.address
+    db_username = var.db_username
+    db_password = var.db_password
+    docker_user = var.dockerhub_username
+    docker_pass = var.dockerhub_password
     docker_compose = templatefile("${path.module}/compose.yml", {
-      rds_endpoint = aws_db_instance.main.endpoint
-      db_username  = var.db_username
-      db_password  = var.db_password
+      rds_address = aws_db_instance.main.address
+      db_username = var.db_username
+      db_password = var.db_password
     })
   }))
 
@@ -441,15 +441,15 @@ resource "aws_instance" "app_az2" {
   vpc_security_group_ids = [aws_security_group.app.id]
 
   user_data = base64encode(templatefile("${path.module}/deploy.sh", {
-    rds_endpoint = aws_db_instance.main.endpoint
-    db_username  = var.db_username
-    db_password  = var.db_password
-    docker_user  = var.dockerhub_username
-    docker_pass  = var.dockerhub_password
+    rds_address = aws_db_instance.main.address
+    db_username = var.db_username
+    db_password = var.db_password
+    docker_user = var.dockerhub_username
+    docker_pass = var.dockerhub_password
     docker_compose = templatefile("${path.module}/compose.yml", {
-      rds_endpoint = aws_db_instance.main.endpoint
-      db_username  = var.db_username
-      db_password  = var.db_password
+      rds_address = aws_db_instance.main.address
+      db_username = var.db_username
+      db_password = var.db_password
     })
   }))
 
