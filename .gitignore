@@ -27,10 +27,12 @@ terraform.tfstate
 terraform.tfstate.backup
 .terraform.lock.hcl
 .terraform.tfstate.lock.info
-*.env
+planfile
+*.tfplan
 
 # Environment Files
 .env
+*.env
 
 # Ignore all migration files
 **/migrations/*.py
