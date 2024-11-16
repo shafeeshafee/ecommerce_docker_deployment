@@ -2,21 +2,70 @@ version: '3.8'
 
 services:
   backend:
-    image: <backend image tagged for dockerhub>:latest
+    image: shafeekuralabs/ecommerce-backend:latest
     environment:
-      - DB_HOST=${rds_endpoint}
+      - DEBUG=0
+      - DB_NAME=ecommerce
+      - DB_HOST=${rds_address}
+      - DB_USER=${db_username}
+      - DB_PASSWORD=${db_password}
+      - DB_PORT=5432
+      - PYTHONUNBUFFERED=1
+      - DJANGO_SUPERUSER_USERNAME=admin
+      - DJANGO_SUPERUSER_EMAIL=admin@example.com
+      - DJANGO_SUPERUSER_PASSWORD=admin123
     ports:
       - "8000:8000"
     command: >
-          sh -c "python manage.py migrate &&
-                python manage.py dumpdata --database=sqlite --natural-foreign --natural-primary -e contenttypes -e auth.Permission --indent 4 > datadump.json &&
-                python manage.py loaddata datadump.json &&
-                rm -f db.sqlite3 &&
-                python manage.py runserver 0.0.0.0:8000"
+      bash -c "
+        echo 'Waiting for PostgreSQL...' &&
+        sleep 15 &&
+        echo 'Running migrations for core apps...' &&
+        python manage.py migrate auth &&
+        python manage.py migrate admin &&
+        python manage.py migrate contenttypes &&
+        python manage.py migrate sessions &&
+        echo 'Making migrations for custom apps...' &&
+        python manage.py makemigrations account &&
+        python manage.py makemigrations product &&
+        python manage.py makemigrations payments &&
+        echo 'Running migrations for custom apps...' &&
+        python manage.py migrate account &&
+        python manage.py migrate product &&
+        python manage.py migrate payments &&
+        echo 'Creating superuser...' &&
+        echo \"from django.contrib.auth.models import User; User.objects.create_superuser('admin', 'admin@example.com', 'admin123') if not User.objects.filter(username='admin').exists() else print('Superuser already exists')\" | python manage.py shell &&
+        echo 'Loading initial data if needed...' &&
+        if [ ! -f /app/initial_data_loaded ]; then
+          echo 'Dumping data from SQLite...' &&
+          python manage.py dumpdata --database=sqlite --natural-foreign --natural-primary -e contenttypes -e auth.Permission --indent 4 > datadump.json &&
+          echo 'Loading data into PostgreSQL...' &&
+          python manage.py loaddata datadump.json &&
+          touch /app/initial_data_loaded
+        fi &&
+        echo 'Starting server...' &&
+        python manage.py runserver 0.0.0.0:8000
+      "
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/products/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   frontend:
-    image: <frontend image tagged for dockerhub>:latest
+    image: shafeekuralabs/ecommerce-frontend:latest
+    environment:
+      - REACT_APP_BACKEND_URL=http://backend:8000
     ports:
       - "3000:3000"
     depends_on:
       - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

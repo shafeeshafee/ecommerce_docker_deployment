@@ -1,70 +1,157 @@
 #!/bin/bash
 
+# Function to log messages
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Function to check last command status
+check_status() {
+    if [ $? -ne 0 ]; then
+        log "ERROR: $1"
+        exit 1
+    fi
+}
+
+# Function to wait for service health
+wait_for_service() {
+    local service=$1
+    local max_attempts=30
+    local attempt=1
+    
+    log "Waiting for $service to be healthy..."
+    while [ $attempt -le $max_attempts ]; do
+        if docker-compose ps | grep -q "$service.*healthy"; then
+            log "$service is healthy"
+            return 0
+        fi
+        log "Attempt $attempt/$max_attempts: $service not yet healthy, waiting..."
+        sleep 10
+        attempt=$((attempt + 1))
+    done
+    
+    log "ERROR: $service failed to become healthy after $max_attempts attempts"
+    return 1
+}
+
 # Update apt packages
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Updating apt packages..."
-sudo apt-get update
+log "Updating apt packages..."
+apt-get update
+check_status "Failed to update apt packages"
 
-# Install Docker dependencies
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Installing Docker dependencies..."
-sudo apt-get install -y ca-certificates curl gnupg lsb-release
+# Install required packages
+log "Installing prerequisites..."
+apt-get install -y ca-certificates curl gnupg postgresql-client
+check_status "Failed to install prerequisites"
 
-# Add Docker’s official GPG key
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Adding Docker's GPG key..."
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+# Add Docker's official GPG key
+log "Adding Docker's GPG key..."
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+check_status "Failed to add Docker's GPG key"
 
-# Set up the stable repository
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Setting up Docker repository..."
+# Set up the Docker repository
+log "Setting up Docker repository..."
 echo \
-  "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-  https://download.docker.com/linux/ubuntu \
-  \$(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  "deb [arch=\"$(dpkg --print-architecture)\" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
+check_status "Failed to set up Docker repository"
 
-# Install Docker Engine and Docker Compose
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Installing Docker Engine and Docker Compose..."
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+# Update apt and install Docker Engine
+log "Installing Docker Engine..."
+apt-get update
+check_status "Failed to update apt after adding Docker repository"
+
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+check_status "Failed to install Docker"
+
+# Start and enable Docker service
+log "Starting Docker service..."
+systemctl start docker
+systemctl enable docker
+check_status "Failed to start Docker service"
 
 # Install Docker Compose standalone
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Installing Docker Compose standalone..."
-sudo curl -L "https://github.com/docker/compose/releases/download/v2.30.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
+log "Installing Docker Compose standalone..."
+curl -L "https://github.com/docker/compose/releases/download/v2.23.3/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+check_status "Failed to install Docker Compose"
 
-# Add current user to docker group
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Adding current user to docker group..."
-sudo usermod -aG docker \$USER
+# Create docker config directory
+mkdir -p /root/.docker
 
-# Log into Docker Hub
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Logging into Docker Hub..."
-echo "${docker_pass}" | sudo docker login -u "${docker_user}" --password-stdin
+# Create docker config with auth
+log "Setting up Docker Hub credentials..."
+cat > /root/.docker/config.json <<EOF
+{
+    "auths": {
+        "https://index.docker.io/v1/": {
+            "auth": "$(echo -n "${docker_user}:${docker_pass}" | base64)"
+        }
+    }
+}
+EOF
+chmod 600 /root/.docker/config.json
 
-# Create app directory and move into it
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Creating app directory..."
-sudo mkdir -p /app
-cd /app
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Moved to /app directory."
+# Create app directory and set permissions
+log "Creating app directory..."
+mkdir -p /app
+chmod 755 /app
+cd /app || exit
+log "Moved to /app directory"
 
 # Create docker-compose.yml file
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Creating docker-compose.yml..."
-cat > docker-compose.yml <<EOF
+log "Creating docker-compose.yml..."
+cat > /app/docker-compose.yml <<EOF
 ${docker_compose}
 EOF
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] docker-compose.yml created."
+chmod 644 /app/docker-compose.yml
+log "docker-compose.yml created"
+
+# Create database initialization script
+log "Creating database initialization script..."
+cat > /app/init-db.sql <<EOF
+CREATE DATABASE ecommerce;
+EOF
+
+# Wait for RDS to be available and create database
+log "Waiting for RDS to be available..."
+for i in {1..30}; do
+    if PGPASSWORD="${db_password}" psql -h "${rds_address}" -U "${db_username}" -c '\l' postgres >/dev/null 2>&1; then
+        log "RDS is available, creating database..."
+        PGPASSWORD="${db_password}" psql -h "${rds_address}" -U "${db_username}" -f /app/init-db.sql postgres
+        break
+    fi
+    log "Waiting for RDS... attempt $i/30"
+    sleep 10
+done
+
+# Wait for Docker to be ready
+log "Waiting for Docker daemon..."
+sleep 10
 
 # Pull Docker images
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Pulling Docker images..."
-sudo docker-compose pull
+log "Pulling Docker images..."
+docker-compose pull
+check_status "Failed to pull Docker images"
 
 # Start Docker containers
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Starting Docker containers..."
-sudo docker-compose up -d --force-recreate
+log "Starting Docker containers..."
+docker-compose up -d --force-recreate
+check_status "Failed to start Docker containers"
+
+# Wait for services to be healthy
+wait_for_service "backend"
+check_status "Backend service failed to become healthy"
+
+wait_for_service "frontend"
+check_status "Frontend service failed to become healthy"
 
 # Clean up unused Docker resources
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Cleaning up unused Docker resources..."
-sudo docker system prune -af
+log "Cleaning up unused Docker resources..."
+docker system prune -af --volumes
+check_status "Failed to clean up Docker resources"
 
-# Log out of Docker Hub
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Logging out of Docker Hub..."
-sudo docker logout
-
-echo "[\$(date '+%Y-%m-%d %H:%M:%S')] Deployment script completed successfully."
+log "Deployment script completed successfully."
