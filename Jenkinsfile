@@ -8,7 +8,6 @@ pipeline {
         WORKSPACE_VENV = './venv'
     }
 
-    stages {
         stage('Build') {
             agent { label 'build-node' } 
             steps {
@@ -31,7 +30,12 @@ pipeline {
                     
                     # Install Python dependencies
                     python -m pip install --upgrade pip
+                    pip install django  # Explicitly install Django first
+                    pip install pytest-django  # Install pytest-django before other requirements
                     pip install -r backend/requirements.txt
+                    
+                    # Verify Django installation
+                    python -c "import django; print('Django version:', django.get_version())"
                     
                     # Install Node.js and npm if not already installed
                     if ! command -v node &> /dev/null; then
@@ -59,15 +63,17 @@ pipeline {
                     
                     # Create test reports directory and install test dependencies
                     mkdir -p test-reports
-                    pip install pytest-django
+                    
+                    # Export the Python path to include the backend directory
+                    export PYTHONPATH=$WORKSPACE/backend:$PYTHONPATH
                     
                     # Run Django migrations
                     cd backend
                     python manage.py makemigrations
                     python manage.py migrate
                     
-                    # Run tests
-                    pytest account/tests.py --verbose --junit-xml ../test-reports/results.xml
+                    # Run tests with proper Django settings
+                    DJANGO_SETTINGS_MODULE=my_project.settings pytest account/tests.py --verbose --junit-xml ../test-reports/results.xml
                     cd ..
                     
                     # Deactivate virtual environment
