@@ -3,11 +3,6 @@ variable "key_name" {
   type        = string
 }
 
-variable "vpc_id" {
-  description = "ID of the VPC"
-  type        = string
-}
-
 variable "app_private_ips" {
   description = "List of private IPs of application instances"
   type        = list(string)

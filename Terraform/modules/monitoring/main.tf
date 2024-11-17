@@ -1,7 +1,6 @@
 resource "aws_security_group" "monitoring" {
   name        = "ecommerce-monitoring-sg"
   description = "Security group for monitoring instance"
-  vpc_id      = var.vpc_id
 
   ingress {
     description = "SSH from anywhere"
@@ -31,11 +30,11 @@ resource "aws_security_group" "monitoring" {
   }
 }
 
-resource "aws_instance" "monitoring" {
-  ami           = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
-  instance_type = "t3.micro"
-  key_name      = var.key_name
 
+resource "aws_instance" "monitoring" {
+  ami                    = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
+  instance_type          = "t3.micro"
+  key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.monitoring.id]
 
   user_data = base64encode(templatefile("${path.module}/scripts/prometheus_setup.sh", {

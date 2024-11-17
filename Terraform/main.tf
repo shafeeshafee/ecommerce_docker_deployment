@@ -57,7 +57,6 @@ module "compute" {
 module "monitoring" {
   source   = "./modules/monitoring"
   key_name = var.key_name
-  vpc_id   = module.network.vpc_id
   app_private_ips = [
     module.compute.app_az1_private_ip,
     module.compute.app_az2_private_ip
