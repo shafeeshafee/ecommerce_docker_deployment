@@ -5,6 +5,7 @@
 # Source utility functions
 source "$(dirname "$0")/scripts/docker_setup.sh"
 source "$(dirname "$0")/scripts/app_setup.sh"
+source "$(dirname "$0")/scripts/node_exporter_setup.sh"
 
 # Function to log messages
 log() {
@@ -30,6 +31,10 @@ main() {
     # Setup application environment
     setup_application_environment "${docker_user}" "${docker_pass}" "${rds_address}" "${db_username}" "${db_password}" "${docker_compose}"
     check_status "Failed to setup application environment"
+    
+    # Setup Node Exporter for monitoring
+    setup_node_exporter
+    check_status "Failed to setup Node Exporter"
     
     log "Deployment completed successfully."
 }
