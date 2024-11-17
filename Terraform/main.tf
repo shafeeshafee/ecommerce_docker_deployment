@@ -12,6 +12,10 @@ provider "aws" {
   region = "us-east-1"
 }
 
+data "aws_vpc" "default" {
+  default = true
+}
+
 module "network" {
   source = "./modules/network"
 
@@ -19,6 +23,7 @@ module "network" {
   public_subnet_cidrs  = var.public_subnet_cidrs
   private_subnet_cidrs = var.private_subnet_cidrs
   key_name             = var.key_name
+  default_vpc_id       = data.aws_vpc.default.id
 }
 
 module "database" {
@@ -61,6 +66,8 @@ module "monitoring" {
     module.compute.app_az1_private_ip,
     module.compute.app_az2_private_ip
   ]
+  custom_vpc_cidr       = var.vpc_cidr
+  peering_connection_id = module.network.peering_connection_id
 
   depends_on = [module.compute]
 }

@@ -15,3 +15,7 @@ variable "key_name" {
   description = "Name of the AWS key pair to use for EC2 instances"
   type        = string
 }
+
+variable "default_vpc_id" {
+  type = string
+}

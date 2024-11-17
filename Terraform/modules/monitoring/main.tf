@@ -2,6 +2,10 @@ data "aws_vpc" "default" {
   default = true
 }
 
+data "aws_route_table" "default_subnet" {
+  subnet_id = data.aws_subnets.default.ids[0]
+}
+
 data "aws_subnets" "default" {
   filter {
     name   = "vpc-id"
@@ -56,4 +60,10 @@ resource "aws_instance" "monitoring" {
   tags = {
     Name = "ecommerce-monitoring"
   }
+}
+
+resource "aws_route" "default_to_custom_vpc" {
+  route_table_id            = data.aws_route_table.default_subnet.id
+  destination_cidr_block    = var.custom_vpc_cidr
+  vpc_peering_connection_id = var.peering_connection_id
 }

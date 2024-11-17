@@ -1,3 +1,7 @@
+data "aws_vpc" "default" {
+  default = true
+}
+
 # VPC Configuration
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
@@ -106,6 +110,23 @@ resource "aws_route_table" "private" {
   }
 }
 
+# VPC peering
+resource "aws_vpc_peering_connection" "peer_default" {
+  vpc_id      = aws_vpc.main.id
+  peer_vpc_id = var.default_vpc_id
+  auto_accept = true
+
+  tags = {
+    Name = "peer_custom_to_default"
+  }
+}
+
+resource "aws_route" "private_to_default_vpc" {
+  route_table_id            = aws_route_table.private.id
+  destination_cidr_block    = data.aws_vpc.default.cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.peer_default.id
+}
+
 # Route Table Associations
 resource "aws_route_table_association" "public_1" {
   subnet_id      = aws_subnet.public_1.id
@@ -188,7 +209,7 @@ resource "aws_security_group" "app" {
     from_port   = 9100
     to_port     = 9100
     protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/8"]
+    cidr_blocks = ["10.0.0.0/8", "172.31.0.0/16"]
   }
 
   egress {
@@ -292,4 +313,8 @@ output "alb_sg_id" {
 
 output "nat_gateway_id" {
   value = aws_nat_gateway.main.id
+}
+
+output "peering_connection_id" {
+  value = aws_vpc_peering_connection.peer_default.id
 }
