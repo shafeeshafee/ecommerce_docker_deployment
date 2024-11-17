@@ -1,0 +1,21 @@
+# Use the Python 3.9 base image
+FROM python:3.9
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy the backend directory into the container
+COPY backend/ /app/
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt django-environ
+
+# Run migrations
+RUN python manage.py makemigrations account payments product
+
+# Expose port 8000
+EXPOSE 8000
+
+# Set the command to run the application
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "my_project.wsgi"]
+
