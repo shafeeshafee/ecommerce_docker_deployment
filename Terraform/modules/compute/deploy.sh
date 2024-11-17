@@ -96,25 +96,66 @@ EOF
 chmod 600 /root/.docker/config.json
 
 # Create app directory and set permissions
-log "Creating app directory..."
-mkdir -p /app
+log "Creating app directories..."
+mkdir -p /app/init
 chmod 755 /app
 cd /app || exit
-log "Moved to /app directory"
+log "Created and moved to /app directory"
 
-# Create docker-compose.yml file
-log "Creating docker-compose.yml..."
-cat > /app/docker-compose.yml <<EOF
-${docker_compose}
+# Create backend initialization script
+log "Creating backend initialization script..."
+cat > /app/init/backend-init.sh <<'EOF'
+#!/bin/bash
+
+echo 'Waiting for PostgreSQL...'
+sleep 15
+
+echo 'Running migrations for core apps...'
+python manage.py migrate auth
+python manage.py migrate admin
+python manage.py migrate contenttypes
+python manage.py migrate sessions
+
+echo 'Making migrations for custom apps...'
+python manage.py makemigrations account
+python manage.py makemigrations product
+python manage.py makemigrations payments
+
+echo 'Running migrations for custom apps...'
+python manage.py migrate account
+python manage.py migrate product
+python manage.py migrate payments
+
+echo 'Creating superuser...'
+echo "from django.contrib.auth.models import User; User.objects.create_superuser('admin', 'admin@example.com', 'admin123') if not User.objects.filter(username='admin').exists() else print('Superuser already exists')" | python manage.py shell
+
+echo 'Loading initial data if needed...'
+if [ ! -f /app/initial_data_loaded ]; then
+    echo 'Dumping data from SQLite...'
+    python manage.py dumpdata --database=sqlite --natural-foreign --natural-primary -e contenttypes -e auth.Permission --indent 4 > datadump.json
+    echo 'Loading data into PostgreSQL...'
+    python manage.py loaddata datadump.json
+    touch /app/initial_data_loaded
+fi
+
+echo 'Starting server...'
+python manage.py runserver 0.0.0.0:8000
 EOF
-chmod 644 /app/docker-compose.yml
-log "docker-compose.yml created"
+chmod +x /app/init/backend-init.sh
 
 # Create database initialization script
 log "Creating database initialization script..."
 cat > /app/init-db.sql <<EOF
 CREATE DATABASE ecommerce;
 EOF
+
+# Create docker-compose.yml file
+log "Creating docker-compose.yml..."
+cat > docker-compose.yml <<EOF
+${docker_compose}
+EOF
+chmod 644 /app/docker-compose.yml
+log "docker-compose.yml created"
 
 # Wait for RDS to be available and create database
 log "Waiting for RDS to be available..."
