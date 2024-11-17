@@ -1,5 +1,5 @@
 #!/bin/bash
-# File: scripts/docker_setup.sh
+
 # Purpose: Handles Docker installation and configuration
 
 setup_docker_environment() {
