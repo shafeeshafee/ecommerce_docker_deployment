@@ -105,6 +105,10 @@ pipeline {
 
         stage('Infrastructure') {
             agent { label 'build-node' }
+            environment {
+                TF_DB_PASSWORD = credentials('terraform-db-password')
+                TF_KEY_NAME = credentials('terraform-key-name')
+            }
             steps {
                 dir('Terraform') {
                     script {
@@ -117,6 +121,8 @@ pipeline {
                                 terraform plan \
                                     -var="dockerhub_username=${DOCKER_CREDS_USR}" \
                                     -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
+                                    -var="db_password=${TF_DB_PASSWORD}" \
+                                    -var="key_name=${TF_KEY_NAME}" \
                                     -detailed-exitcode -out=tfplan 2>&1
                             """,
                             returnStatus: true
