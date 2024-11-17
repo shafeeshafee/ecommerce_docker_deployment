@@ -8,6 +8,7 @@ pipeline {
         WORKSPACE_VENV = './venv'
     }
 
+    stages {
         stage('Build') {
             agent { label 'build-node' } 
             steps {
