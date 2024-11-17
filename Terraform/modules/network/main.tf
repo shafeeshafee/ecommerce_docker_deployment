@@ -255,75 +255,6 @@ resource "aws_security_group" "alb" {
   }
 }
 
-# Montitoring Security Group
-resource "aws_security_group" "monitoring" {
-  name        = "ecommerce-monitoring-sg"
-  description = "Security group for monitoring instance"
-  # Note: This will be created in the default VPC
-
-  ingress {
-    description = "SSH from anywhere"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Prometheus"
-    from_port   = 9090
-    to_port     = 9090
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "ecommerce-monitoring-sg"
-  }
-}
-
-resource "aws_instance" "monitoring" {
-  ami           = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
-  instance_type = "t3.micro"
-  key_name      = var.key_name # Make sure to add this variable if not already present
-
-  # This will launch in the default VPC
-  vpc_security_group_ids = [aws_security_group.monitoring.id]
-
-  user_data = base64encode(<<-EOF
-              #!/bin/bash
-              # Install Prometheus
-              apt-get update
-              apt-get install -y prometheus
-
-              # Configure Prometheus
-              cat > /etc/prometheus/prometheus.yml <<EOL
-              global:
-                scrape_interval: 15s
-
-              scrape_configs:
-                - job_name: 'node_exporter'
-                  static_configs:
-                    - targets: ['${aws_instance.app_az1.private_ip}:9100', '${aws_instance.app_az2.private_ip}:9100']
-              EOL
-
-              # Restart Prometheus
-              systemctl restart prometheus
-              EOF
-  )
-
-  tags = {
-    Name = "ecommerce-monitoring"
-  }
-}
-
 # Outputs
 output "vpc_id" {
   value = aws_vpc.main.id
@@ -361,8 +292,4 @@ output "alb_sg_id" {
 
 output "nat_gateway_id" {
   value = aws_nat_gateway.main.id
-}
-
-output "monitoring_sg_id" {
-  value = aws_security_group.monitoring.id
 }
