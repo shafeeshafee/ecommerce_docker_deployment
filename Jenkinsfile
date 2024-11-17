@@ -5,6 +5,7 @@ pipeline {
         DOCKER_CREDS = credentials('docker-hub-credentials')
         DJANGO_SETTINGS_MODULE = 'my_project.settings'
         PYTHONPATH = 'backend'
+        WORKSPACE_VENV = './venv'
     }
 
     stages {
@@ -12,14 +13,33 @@ pipeline {
             agent { label 'build-node' } 
             steps {
                 sh '''#!/bin/bash
+                    # Install python3-venv if not already installed
+                    sudo apt-get update
+                    sudo apt-get install -y python3-venv python3-pip
+                    
+                    # Create and activate virtual environment if it doesn't exist
+                    python3 -m venv $WORKSPACE_VENV
+                    
+                    # Activate virtual environment and install dependencies
+                    . $WORKSPACE_VENV/bin/activate
+                    
                     # Install Python dependencies
                     python -m pip install --upgrade pip
                     pip install -r backend/requirements.txt
                     
-                    # Install Node.js dependencies
+                    # Install Node.js and npm if not already installed
+                    if ! command -v node &> /dev/null; then
+                        curl -fsSL https://deb.nodesource.com/setup_14.x | sudo -E bash -
+                        sudo apt-get install -y nodejs
+                    fi
+                    
+                    # Install frontend dependencies
                     cd frontend
                     npm install || (echo "Frontend build failed"; exit 1)
                     cd ..
+                    
+                    # Deactivate virtual environment
+                    deactivate
                 '''
             }
         }
@@ -28,16 +48,24 @@ pipeline {
             agent { label 'build-node' }
             steps {
                 sh '''#!/bin/bash
+                    # Activate virtual environment
+                    . $WORKSPACE_VENV/bin/activate
+                    
                     # Create test reports directory and install test dependencies
                     mkdir -p test-reports
-                    python3 -m pip install pytest-django
+                    pip install pytest-django
                     
                     # Run Django migrations
-                    python3 backend/manage.py makemigrations
-                    python3 backend/manage.py migrate
+                    cd backend
+                    python manage.py makemigrations
+                    python manage.py migrate
                     
                     # Run tests
-                    pytest backend/account/tests.py --verbose --junit-xml test-reports/results.xml
+                    pytest account/tests.py --verbose --junit-xml ../test-reports/results.xml
+                    cd ..
+                    
+                    # Deactivate virtual environment
+                    deactivate
                 '''
             }
         }
@@ -80,10 +108,10 @@ pipeline {
             steps {
                 dir('Terraform') {
                     script {
-                        // initialize Terraform
+                        // Initialize Terraform
                         sh 'terraform init'
                         
-                        // run terraform plan and capture the output
+                        // Run terraform plan and capture the output
                         def planOutput = sh(
                             script: """
                                 terraform plan \
@@ -95,19 +123,11 @@ pipeline {
                         )
                         
                         // Check the exit code
-                        // 0 = No changes needed
-                        // 1 = Error
-                        // 2 = Changes needed
                         if (planOutput == 0) {
                             echo "No infrastructure changes needed"
                         } else if (planOutput == 2) {
                             echo "Infrastructure changes detected"
-                            // NOTE (Shaf):
-                            // For this workload, we are auto-approving
-                            // In production, we want to add a manual approval step here
-                            sh '''
-                                terraform apply -auto-approve tfplan
-                            '''
+                            sh 'terraform apply -auto-approve tfplan'
                         } else {
                             error "Terraform plan failed"
                         }
@@ -117,11 +137,8 @@ pipeline {
             post {
                 success {
                     dir('Terraform') {
-                        // store the current infrastructure state
                         sh '''
-                            # Ensure the terraform-states directory exists
                             mkdir -p terraform-states
-                            # Copy current state with timestamp
                             cp terraform.tfstate "terraform-states/terraform-$(date +%Y%m%d-%H%M%S).tfstate"
                         '''
                     }
