@@ -1,23 +1,11 @@
+# Fetch the default VPC
 data "aws_vpc" "default" {
   default = true
 }
 
-data "aws_route_table" "default_subnet" {
-  subnet_id = data.aws_subnets.default.ids[0]
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-}
-
-data "aws_route_tables" "default_main" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
+# Fetch the main route table of the default VPC
+data "aws_route_table" "default_main" {
+  vpc_id = data.aws_vpc.default.id
 
   filter {
     name   = "association.main"
@@ -25,6 +13,15 @@ data "aws_route_tables" "default_main" {
   }
 }
 
+# Fetch all subnets in the default VPC
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+# Security Group for Monitoring Instance in the default VPC
 resource "aws_security_group" "monitoring" {
   name        = "ecommerce-monitoring-sg"
   description = "Security group for monitoring instance"
@@ -58,12 +55,13 @@ resource "aws_security_group" "monitoring" {
   }
 }
 
+# Monitoring Instance in the default VPC
 resource "aws_instance" "monitoring" {
   ami                    = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
   instance_type          = "t3.micro"
   key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.monitoring.id]
-  subnet_id              = data.aws_subnets.default.ids[0]
+  subnet_id              = data.aws_subnets.default.ids[0] # Use the first subnet in the default VPC
 
   user_data = base64encode(templatefile("${path.module}/scripts/prometheus_setup.sh", {
     app_ips = jsonencode(var.app_private_ips)
@@ -75,7 +73,7 @@ resource "aws_instance" "monitoring" {
 }
 
 resource "aws_route" "default_to_custom_vpc" {
-  route_table_id            = data.aws_route_tables.default_main.ids[0]
+  route_table_id            = data.aws_route_table.default_main.id
   destination_cidr_block    = var.custom_vpc_cidr
   vpc_peering_connection_id = var.peering_connection_id
 }

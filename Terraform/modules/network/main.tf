@@ -1,3 +1,4 @@
+# Fetch the default VPC
 data "aws_vpc" "default" {
   default = true
 }
@@ -110,7 +111,7 @@ resource "aws_route_table" "private" {
   }
 }
 
-# VPC peering
+# VPC Peering Connection between custom VPC and default VPC
 resource "aws_vpc_peering_connection" "peer_default" {
   vpc_id      = aws_vpc.main.id
   peer_vpc_id = var.default_vpc_id
@@ -121,6 +122,7 @@ resource "aws_vpc_peering_connection" "peer_default" {
   }
 }
 
+# Add a route in the private route table to the default VPC via the peering connection
 resource "aws_route" "private_to_default_vpc" {
   route_table_id            = aws_route_table.private.id
   destination_cidr_block    = data.aws_vpc.default.cidr_block
@@ -205,7 +207,7 @@ resource "aws_security_group" "app" {
   }
 
   ingress {
-    description = "Node Exporter"
+    description = "Node Exporter from custom and default VPC"
     from_port   = 9100
     to_port     = 9100
     protocol    = "tcp"

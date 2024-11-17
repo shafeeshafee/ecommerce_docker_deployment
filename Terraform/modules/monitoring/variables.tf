@@ -9,9 +9,11 @@ variable "app_private_ips" {
 }
 
 variable "custom_vpc_cidr" {
-  type = string
+  description = "CIDR block of the custom VPC"
+  type        = string
 }
 
 variable "peering_connection_id" {
-  type = string
+  description = "ID of the VPC peering connection"
+  type        = string
 }
