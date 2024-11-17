@@ -13,6 +13,18 @@ data "aws_subnets" "default" {
   }
 }
 
+data "aws_route_tables" "default_main" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+
+  filter {
+    name   = "association.main"
+    values = ["true"]
+  }
+}
+
 resource "aws_security_group" "monitoring" {
   name        = "ecommerce-monitoring-sg"
   description = "Security group for monitoring instance"
@@ -63,7 +75,7 @@ resource "aws_instance" "monitoring" {
 }
 
 resource "aws_route" "default_to_custom_vpc" {
-  route_table_id            = data.aws_route_table.default_subnet.id
+  route_table_id            = data.aws_route_tables.default_main.ids[0]
   destination_cidr_block    = var.custom_vpc_cidr
   vpc_peering_connection_id = var.peering_connection_id
 }
