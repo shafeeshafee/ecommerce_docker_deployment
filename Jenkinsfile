@@ -30,11 +30,11 @@ pipeline {
                 sh '''#!/bin/bash
                     # Create test reports directory and install test dependencies
                     mkdir -p test-reports
-                    pip install pytest-django
+                    python3 -m pip install pytest-django
                     
                     # Run Django migrations
-                    python backend/manage.py makemigrations
-                    python backend/manage.py migrate
+                    python3 backend/manage.py makemigrations
+                    python3 backend/manage.py migrate
                     
                     # Run tests
                     pytest backend/account/tests.py --verbose --junit-xml test-reports/results.xml
