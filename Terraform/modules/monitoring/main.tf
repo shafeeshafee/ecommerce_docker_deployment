@@ -1,6 +1,18 @@
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
 resource "aws_security_group" "monitoring" {
   name        = "ecommerce-monitoring-sg"
   description = "Security group for monitoring instance"
+  vpc_id      = data.aws_vpc.default.id
 
   ingress {
     description = "SSH from anywhere"
@@ -30,12 +42,12 @@ resource "aws_security_group" "monitoring" {
   }
 }
 
-
 resource "aws_instance" "monitoring" {
   ami                    = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
   instance_type          = "t3.micro"
   key_name               = var.key_name
   vpc_security_group_ids = [aws_security_group.monitoring.id]
+  subnet_id              = data.aws_subnets.default.ids[0]
 
   user_data = base64encode(templatefile("${path.module}/scripts/prometheus_setup.sh", {
     app_ips = jsonencode(var.app_private_ips)
