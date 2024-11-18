@@ -1,12 +1,5 @@
 #!/bin/bash
 
-# Purpose: Main deployment script that orchestrates the setup process
-
-# Source utility functions
-source "$(dirname "$0")/scripts/docker_setup.sh"
-source "$(dirname "$0")/scripts/app_setup.sh"
-source "$(dirname "$0")/scripts/node_exporter_setup.sh"
-
 # Function to log messages
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -19,6 +12,11 @@ check_status() {
         exit 1
     fi
 }
+
+# Source utility functions after defining log and check_status
+source "$(dirname "$0")/scripts/docker_setup.sh"
+source "$(dirname "$0")/scripts/app_setup.sh"
+source "$(dirname "$0")/scripts/node_exporter_setup.sh"
 
 # Main deployment process
 main() {
