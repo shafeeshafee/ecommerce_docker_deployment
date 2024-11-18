@@ -104,6 +104,7 @@ pipeline {
                                     -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
                                     -var="db_password=${TF_DB_PASSWORD}" \
                                     -var="key_name=${TF_KEY_NAME}" \
+                                    -var="private_key_path=${TF_PRIVATE_KEY_PATH}" \
                                     -detailed-exitcode -out=tfplan 2>&1
                             """,
                             returnStatus: true
