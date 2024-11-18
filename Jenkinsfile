@@ -10,46 +10,13 @@ pipeline {
 
     stages {
         stage('Build') {
-            agent { label 'build-node' } 
+            agent { label 'build-node' }
             steps {
                 sh '''#!/bin/bash
-                    # Install system dependencies first
-                    sudo apt-get update
-                    sudo apt-get install -y python3-venv python3-pip \
-                                        libjpeg-dev zlib1g-dev \
-                                        libpq-dev python3-dev \
-                                        build-essential libssl-dev \
-                                        libffi-dev libjpeg8-dev \
-                                        liblcms2-dev libwebp-dev \
-                                        libopenjp2-7-dev
-                    
-                    # Create and activate virtual environment if it doesn't exist
-                    python3 -m venv $WORKSPACE_VENV
-                    
-                    # Activate virtual environment and install dependencies
-                    . $WORKSPACE_VENV/bin/activate
-                    
-                    # Install Python dependencies
-                    python -m pip install --upgrade pip
-                    pip install django  # Explicitly install Django first
-                    pip install pytest-django  # Install pytest-django before other requirements
+                    python3 -m venv venv
+                    source venv/bin/activate
+                    pip install --upgrade pip
                     pip install -r backend/requirements.txt
-                    
-                    # Verify Django installation
-                    python -c "import django; print('Django version:', django.get_version())"
-                    
-                    # Install Node.js and npm if not already installed
-                    if ! command -v node &> /dev/null; then
-                        curl -fsSL https://deb.nodesource.com/setup_14.x | sudo -E bash -
-                        sudo apt-get install -y nodejs
-                    fi
-                    
-                    # Install frontend dependencies
-                    cd frontend
-                    npm install || (echo "Frontend build failed"; exit 1)
-                    cd ..
-                    
-                    # Deactivate virtual environment
                     deactivate
                 '''
             }
