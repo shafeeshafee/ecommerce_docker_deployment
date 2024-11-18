@@ -88,6 +88,7 @@ pipeline {
             environment {
                 TF_DB_PASSWORD = credentials('terraform-db-password')
                 TF_KEY_NAME = credentials('terraform-key-name')
+                TF_PRIVATE_KEY_PATH = credentials('terraform-private-key-path')
             }
             steps {
                 dir('Terraform') {
