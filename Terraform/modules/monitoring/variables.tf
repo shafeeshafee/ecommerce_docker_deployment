@@ -17,3 +17,8 @@ variable "peering_connection_id" {
   description = "ID of the VPC peering connection"
   type        = string
 }
+
+variable "private_key_path" {
+  description = "Path to private key for SSH access"
+  type        = string
+}

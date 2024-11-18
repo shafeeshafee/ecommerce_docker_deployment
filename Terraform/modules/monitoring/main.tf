@@ -13,11 +13,74 @@ data "aws_route_table" "default_main" {
   }
 }
 
+# Data source for existing monitoring instance
+data "aws_instances" "monitoring" {
+  filter {
+    name   = "tag:Name"
+    values = ["ecommerce-monitoring"]
+  }
+
+  filter {
+    name   = "instance-state-name"
+    values = ["running", "stopped"]
+  }
+}
+
 # Fetch all subnets in the default VPC
 data "aws_subnets" "default" {
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.default.id]
+  }
+}
+
+# Only create monitoring instance if it doesn't exist
+resource "aws_instance" "monitoring" {
+  count = length(data.aws_instances.monitoring.ids) == 0 ? 1 : 0
+
+  ami                    = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
+  instance_type          = "t3.micro"
+  key_name               = var.key_name
+  vpc_security_group_ids = [aws_security_group.monitoring.id]
+  subnet_id              = data.aws_subnets.default.ids[0]
+
+  user_data = base64encode(templatefile("${path.module}/scripts/prometheus_setup.sh", {
+    app_ips = jsonencode(var.app_private_ips)
+  }))
+
+  tags = {
+    Name = "ecommerce-monitoring"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Update monitoring configuration on existing instance
+resource "null_resource" "update_monitoring" {
+  count = length(data.aws_instances.monitoring.ids) > 0 ? 1 : 0
+
+  triggers = {
+    app_ips_hash = sha256(jsonencode(var.app_private_ips))
+  }
+
+  connection {
+    type        = "ssh"
+    user        = "ubuntu"
+    private_key = file(var.private_key_path)
+    host        = data.aws_instances.monitoring.private_ips[0]
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "echo '${templatefile("${path.module}/scripts/prometheus_setup.sh", {
+        app_ips = jsonencode(var.app_private_ips)
+      })}' > /tmp/update_prometheus.sh",
+      "chmod +x /tmp/update_prometheus.sh",
+      "sudo /tmp/update_prometheus.sh",
+      "rm /tmp/update_prometheus.sh"
+    ]
   }
 }
 

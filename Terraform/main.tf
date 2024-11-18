@@ -68,6 +68,7 @@ module "monitoring" {
   ]
   custom_vpc_cidr       = var.vpc_cidr
   peering_connection_id = module.network.peering_connection_id
+  private_key_path      = var.private_key_path
 
   depends_on = [module.compute]
 }

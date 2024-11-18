@@ -80,3 +80,8 @@ variable "db_allocated_storage" {
   type        = number
   default     = 20
 }
+
+variable "private_key_path" {
+  description = "Path to private key for SSH access"
+  type        = string
+}
