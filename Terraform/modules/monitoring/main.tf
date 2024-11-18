@@ -34,10 +34,8 @@ data "aws_subnets" "default" {
   }
 }
 
-# Only create monitoring instance if it doesn't exist
+# Monitoring EC2 Instance
 resource "aws_instance" "monitoring" {
-  count = length(data.aws_instances.monitoring.ids) == 0 ? 1 : 0
-
   ami                    = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
   instance_type          = "t3.micro"
   key_name               = var.key_name
@@ -59,8 +57,6 @@ resource "aws_instance" "monitoring" {
 
 # Update monitoring configuration on existing instance
 resource "null_resource" "update_monitoring" {
-  count = length(data.aws_instances.monitoring.ids) > 0 ? 1 : 0
-
   triggers = {
     app_ips_hash = sha256(jsonencode(var.app_private_ips))
   }
@@ -69,7 +65,7 @@ resource "null_resource" "update_monitoring" {
     type        = "ssh"
     user        = "ubuntu"
     private_key = file(var.private_key_path)
-    host        = data.aws_instances.monitoring.private_ips[0]
+    host        = aws_instance.monitoring.private_ip
   }
 
   provisioner "remote-exec" {
@@ -82,6 +78,8 @@ resource "null_resource" "update_monitoring" {
       "rm /tmp/update_prometheus.sh"
     ]
   }
+
+  depends_on = [aws_instance.monitoring]
 }
 
 # Security Group for Monitoring Instance in the default VPC
@@ -118,22 +116,6 @@ resource "aws_security_group" "monitoring" {
   }
 }
 
-# Monitoring Instance in the default VPC
-resource "aws_instance" "monitoring" {
-  ami                    = "ami-0c7217cdde317cfec" # Ubuntu 22.04 LTS
-  instance_type          = "t3.micro"
-  key_name               = var.key_name
-  vpc_security_group_ids = [aws_security_group.monitoring.id]
-  subnet_id              = data.aws_subnets.default.ids[0] # Use the first subnet in the default VPC
-
-  user_data = base64encode(templatefile("${path.module}/scripts/prometheus_setup.sh", {
-    app_ips = jsonencode(var.app_private_ips)
-  }))
-
-  tags = {
-    Name = "ecommerce-monitoring"
-  }
-}
 
 resource "aws_route" "default_to_custom_vpc" {
   route_table_id            = data.aws_route_table.default_main.id

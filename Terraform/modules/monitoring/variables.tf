@@ -8,6 +8,11 @@ variable "app_private_ips" {
   type        = list(string)
 }
 
+variable "private_key_path" {
+  description = "Path to private key for SSH access"
+  type        = string
+}
+
 variable "custom_vpc_cidr" {
   description = "CIDR block of the custom VPC"
   type        = string
@@ -15,10 +20,5 @@ variable "custom_vpc_cidr" {
 
 variable "peering_connection_id" {
   description = "ID of the VPC peering connection"
-  type        = string
-}
-
-variable "private_key_path" {
-  description = "Path to private key for SSH access"
   type        = string
 }
