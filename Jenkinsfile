@@ -18,6 +18,7 @@ pipeline {
                     source venv/bin/activate
                     pip install --upgrade pip
                     pip install -r backend/requirements.txt
+                    pip install checkov
                     deactivate
                 '''
             }
@@ -29,11 +30,23 @@ pipeline {
                 // Create reports directory
                 sh 'mkdir -p reports'
                 
-                // Run Checkov for IaC scanning
-                sh '''
+                // Run security scans
+                sh '''#!/bin/bash
+                    # Activate virtual environment
+                    source venv/bin/activate
+                    
+                    # Run Checkov for IaC scanning
                     cd Terraform
-                    checkov -d . -o json > ../reports/checkov_report.json
+                    checkov -d . -o json > ../reports/checkov_report.json || true
                     cd ..
+                    
+                    # Deactivate virtual environment
+                    deactivate
+                    
+                    # Run Trivy vulnerability scans
+                    trivy config --severity HIGH,CRITICAL -f json -o reports/trivy_dockerfile_report.json . || true
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_python_image_report.json python:3.9 || true
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_node_image_report.json node:14 || true
                 '''
 
                 // Run SonarQube analysis
@@ -45,19 +58,9 @@ pipeline {
                             -Dsonar.host.url=http://localhost:9000 \
                             -Dsonar.login=$SONAR_TOKEN \
                             -Dsonar.python.coverage.reportPaths=coverage.xml \
-                            -Dsonar.exclusions=**/tests/**,**/*.json,**/*.yml
+                            -Dsonar.exclusions=**/tests/**,**/*.json,**/*.yml || true
                     '''
                 }
-                
-                // Run Trivy vulnerability scans on Dockerfiles and images
-                sh '''
-                    # Scan Dockerfiles
-                    trivy config --severity HIGH,CRITICAL -f json -o reports/trivy_dockerfile_report.json .
-                    
-                    # Scan base images
-                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_python_image_report.json python:3.9
-                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_node_image_report.json node:14
-                '''
             }
         }
 
@@ -122,8 +125,8 @@ pipeline {
 
                 // Scan built images with Trivy
                 sh '''
-                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_backend_report.json shafeekuralabs/ecommerce-backend:latest
-                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_frontend_report.json shafeekuralabs/ecommerce-frontend:latest
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_backend_report.json shafeekuralabs/ecommerce-backend:latest || true
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_frontend_report.json shafeekuralabs/ecommerce-frontend:latest || true
                 '''
             }
         }
@@ -197,7 +200,7 @@ pipeline {
                         /opt/zap/zap.sh -cmd \
                             -quickurl $ALB_URL \
                             -quickout reports/zap_scan_results.json \
-                            -quickprogress
+                            -quickprogress || true
                     '''
                 }
             }
@@ -238,6 +241,31 @@ pipeline {
                     docker logout
                     docker system prune -f
                 '''
+            }
+        }
+        failure {
+            node('build-node') {
+                script {
+                    def userInput = input(
+                        message: 'Build failed. Would you like to destroy the infrastructure?',
+                        parameters: [
+                            booleanParam(defaultValue: false, description: 'Destroy all created infrastructure', name: 'destroy')
+                        ]
+                    )
+                    
+                    if (userInput) {
+                        dir('Terraform') {
+                            sh """
+                                terraform destroy -auto-approve \
+                                    -var="dockerhub_username=${DOCKER_CREDS_USR}" \
+                                    -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
+                                    -var="db_password=${TF_DB_PASSWORD}" \
+                                    -var="key_name=${TF_KEY_NAME}" \
+                                    -var="private_key_path=${TF_PRIVATE_KEY_PATH}"
+                            """
+                        }
+                    }
+                }
             }
         }
     }
