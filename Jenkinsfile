@@ -34,6 +34,15 @@ pipeline {
                         -Dsonar.sources=. \
                         -Dsonar.host.url=http://localhost:9000 \
                         -Dsonar.login=${SONAR_TOKEN} || true
+                        
+                    # Save SonarQube results
+                    curl -s http://localhost:9000/api/qualitygates/project_status?projectKey=ecommerce-docker > reports/sonar_report.json || true
+                '''
+                
+                sh '''#!/bin/bash
+                    if grep -q '"status":"ERROR"' reports/sonar_report.json; then
+                        echo "WARNING: SonarQube quality gate failed"
+                    fi
                 '''
             }
         }
@@ -51,15 +60,13 @@ pipeline {
                     # Scan Terraform files and save report
                     checkov -d Terraform --framework terraform -o json > reports/checkov_report.json || true
                     
+                    # Check for high severity issues
+                    if grep -q '"severity": "HIGH"' reports/checkov_report.json; then
+                        echo "WARNING: Checkov found high severity issues"
+                    fi
+                    
                     deactivate
                 '''
-                
-                script {
-                    def report = readFile('reports/checkov_report.json')
-                    if (report.contains('"failed": true')) {
-                        echo "Warning: Checkov found security issues in infrastructure code"
-                    }
-                }
             }
         }
 
@@ -103,18 +110,14 @@ pipeline {
                     # Scan frontend Dockerfile and dependencies
                     trivy config -f json -o reports/trivy_config_frontend.json Dockerfile.frontend || true
                     trivy fs -f json -o reports/trivy_fs_frontend.json frontend/ || true
+                    
+                    # Check for critical vulnerabilities
+                    for report in reports/trivy_*.json; do
+                        if grep -q '"Severity": "CRITICAL"' "$report"; then
+                            echo "WARNING: Critical vulnerabilities found in $report"
+                        fi
+                    done
                 '''
-                
-                script {
-                    echo "Analyzing Trivy scan results..."
-                    def reports = findFiles(glob: 'reports/trivy_*.json')
-                    reports.each { report ->
-                        def content = readFile(report.path)
-                        if (content.contains('"Severity": "CRITICAL"')) {
-                            echo "Warning: Critical vulnerabilities found in ${report.name}"
-                        }
-                    }
-                }
             }
         }
 
@@ -145,7 +148,7 @@ pipeline {
                     script {
                         sh 'terraform init'
                         
-                        def planOutput = sh(
+                        def planExitCode = sh(
                             script: """
                                 terraform plan \
                                     -var="dockerhub_username=${DOCKER_CREDS_USR}" \
@@ -158,9 +161,9 @@ pipeline {
                             returnStatus: true
                         )
                         
-                        if (planOutput == 0) {
+                        if (planExitCode == 0) {
                             echo "No infrastructure changes needed"
-                        } else if (planOutput == 2) {
+                        } else if (planExitCode == 2) {
                             echo "Infrastructure changes detected"
                             sh 'terraform apply -auto-approve tfplan'
                         } else {
@@ -184,33 +187,29 @@ pipeline {
         stage('Security: Dynamic Application Scan') {
             agent { label 'build-node' }
             steps {
-                script {
-                    // Allow application to stabilize
-                    sleep(time: 2, unit: 'MINUTES')
+                sh '''#!/bin/bash
+                    # Allow application to stabilize
+                    sleep 120
                     
-                    // Get ALB DNS from Terraform output
-                    dir('Terraform') {
-                        def albDns = sh(
-                            script: 'terraform output -raw alb_dns_name',
-                            returnStdout: true
-                        ).trim()
-                        
-                        // Run OWASP ZAP scan
-                        sh """
-                            mkdir -p reports
-                            /opt/zap/zap-baseline.py -t http://${albDns} \
-                                -r reports/zap_report.html \
-                                -J reports/zap_report.json \
-                                -I || true
-                        """
-                    }
+                    # Get ALB DNS from Terraform output
+                    cd Terraform
+                    ALB_DNS=$(terraform output -raw alb_dns_name)
+                    cd ..
                     
-                    echo "Analyzing ZAP scan results..."
-                    def zapReport = readFile('reports/zap_report.json')
-                    if (zapReport.contains('"risk": "High"')) {
-                        echo "Warning: High-risk vulnerabilities found in ZAP scan"
-                    }
-                }
+                    # Create reports directory
+                    mkdir -p reports
+                    
+                    # Run OWASP ZAP scan
+                    /opt/zap/zap-baseline.py -t http://${ALB_DNS} \
+                        -r reports/zap_report.html \
+                        -J reports/zap_report.json \
+                        -I || true
+                    
+                    # Check for high risk findings
+                    if grep -q '"risk": "High"' reports/zap_report.json; then
+                        echo "WARNING: ZAP found high risk vulnerabilities"
+                    fi
+                '''
             }
         }
     }
@@ -223,7 +222,9 @@ pipeline {
                     docker system prune -f
                 '''
                 
-                archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
+                // Archive reports directory
+                sh 'if [ -d "reports" ]; then tar -czf security-reports.tar.gz reports/; fi'
+                archiveArtifacts artifacts: '**/*reports.tar.gz', allowEmptyArchive: true
                 
                 cleanWs()
             }
