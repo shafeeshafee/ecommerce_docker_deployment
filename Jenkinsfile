@@ -6,6 +6,7 @@ pipeline {
         DJANGO_SETTINGS_MODULE = 'my_project.settings'
         PYTHONPATH = 'backend'
         WORKSPACE_VENV = './venv'
+        TF_ENVIRONMENT = credentials('terraform-environment')
         SONAR_TOKEN = credentials('sonar-token')
     }
 
@@ -18,7 +19,6 @@ pipeline {
                     source venv/bin/activate
                     pip install --upgrade pip
                     pip install -r backend/requirements.txt
-                    pip install checkov
                     deactivate
                 '''
             }
@@ -30,37 +30,35 @@ pipeline {
                 // Create reports directory
                 sh 'mkdir -p reports'
                 
-                // Run security scans
+                // Run Checkov for IaC scanning
                 sh '''#!/bin/bash
-                    # Activate virtual environment
                     source venv/bin/activate
-                    
-                    # Run Checkov for IaC scanning
                     cd Terraform
                     checkov -d . -o json > ../reports/checkov_report.json || true
                     cd ..
-                    
-                    # Deactivate virtual environment
                     deactivate
-                    
-                    # Run Trivy vulnerability scans
-                    trivy config --severity HIGH,CRITICAL -f json -o reports/trivy_dockerfile_report.json . || true
-                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_python_image_report.json python:3.9 || true
-                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_node_image_report.json node:14 || true
                 '''
 
                 // Run SonarQube analysis
-                withSonarQubeEnv('SonarQubeServer') {
-                    sh '''
-                        sonar-scanner \
-                            -Dsonar.projectKey=ecommerce-docker \
-                            -Dsonar.sources=. \
-                            -Dsonar.host.url=http://localhost:9000 \
-                            -Dsonar.login=$SONAR_TOKEN \
-                            -Dsonar.python.coverage.reportPaths=coverage.xml \
-                            -Dsonar.exclusions=**/tests/**,**/*.json,**/*.yml || true
-                    '''
-                }
+                sh '''#!/bin/bash
+                    sonar-scanner \
+                        -Dsonar.projectKey=ecommerce-docker \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=http://localhost:9000 \
+                        -Dsonar.login=$SONAR_TOKEN \
+                        -Dsonar.python.coverage.reportPaths=coverage.xml \
+                        -Dsonar.exclusions=**/tests/**,**/*.json,**/*.yml || true
+                '''
+                
+                // Run Trivy vulnerability scans
+                sh '''
+                    # Scan Dockerfiles
+                    trivy config --severity HIGH,CRITICAL -f json -o reports/trivy_dockerfile_report.json . || true
+                    
+                    # Scan base images
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_python_image_report.json python:3.9 || true
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_node_image_report.json node:14 || true
+                '''
             }
         }
 
@@ -133,11 +131,6 @@ pipeline {
 
         stage('Infrastructure') {
             agent { label 'build-node' }
-            environment {
-                TF_DB_PASSWORD = credentials('terraform-db-password')
-                TF_KEY_NAME = credentials('terraform-key-name')
-                TF_PRIVATE_KEY_PATH = credentials('terraform-private-key-path')
-            }
             steps {
                 dir('Terraform') {
                     script {
@@ -150,9 +143,9 @@ pipeline {
                                 terraform plan \
                                     -var="dockerhub_username=${DOCKER_CREDS_USR}" \
                                     -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
-                                    -var="db_password=${TF_DB_PASSWORD}" \
-                                    -var="key_name=${TF_KEY_NAME}" \
-                                    -var="private_key_path=${TF_PRIVATE_KEY_PATH}" \
+                                    -var="db_password=${TF_ENVIRONMENT_PSW}" \
+                                    -var="key_name=${TF_ENVIRONMENT_KEY}" \
+                                    -var="private_key_path=${TF_ENVIRONMENT_PATH}" \
                                     -detailed-exitcode -out=tfplan 2>&1
                             """,
                             returnStatus: true
@@ -163,7 +156,9 @@ pipeline {
                             echo "No infrastructure changes needed"
                         } else if (planOutput == 2) {
                             echo "Infrastructure changes detected"
-                            sh 'terraform apply -auto-approve tfplan'
+                            sh """
+                                terraform apply -auto-approve tfplan
+                            """
                         } else {
                             error "Terraform plan failed"
                         }
@@ -223,9 +218,9 @@ pipeline {
                                 terraform destroy -auto-approve \
                                     -var="dockerhub_username=${DOCKER_CREDS_USR}" \
                                     -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
-                                    -var="db_password=${TF_DB_PASSWORD}" \
-                                    -var="key_name=${TF_KEY_NAME}" \
-                                    -var="private_key_path=${TF_PRIVATE_KEY_PATH}"
+                                    -var="db_password=${TF_ENVIRONMENT_PSW}" \
+                                    -var="key_name=${TF_ENVIRONMENT_KEY}" \
+                                    -var="private_key_path=${TF_ENVIRONMENT_PATH}"
                             """
                         }
                     }
@@ -246,24 +241,28 @@ pipeline {
         failure {
             node('build-node') {
                 script {
-                    def userInput = input(
-                        message: 'Build failed. Would you like to destroy the infrastructure?',
-                        parameters: [
-                            booleanParam(defaultValue: false, description: 'Destroy all created infrastructure', name: 'destroy')
-                        ]
-                    )
-                    
-                    if (userInput) {
-                        dir('Terraform') {
-                            sh """
-                                terraform destroy -auto-approve \
-                                    -var="dockerhub_username=${DOCKER_CREDS_USR}" \
-                                    -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
-                                    -var="db_password=${TF_DB_PASSWORD}" \
-                                    -var="key_name=${TF_KEY_NAME}" \
-                                    -var="private_key_path=${TF_PRIVATE_KEY_PATH}"
-                            """
+                    try {
+                        def userInput = input(
+                            message: 'Build failed. Would you like to destroy the infrastructure?',
+                            parameters: [
+                                booleanParam(defaultValue: false, description: 'Destroy all created infrastructure', name: 'destroy')
+                            ]
+                        )
+                        
+                        if (userInput) {
+                            dir('Terraform') {
+                                sh """
+                                    terraform destroy -auto-approve \
+                                        -var="dockerhub_username=${DOCKER_CREDS_USR}" \
+                                        -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
+                                        -var="db_password=${TF_ENVIRONMENT_PSW}" \
+                                        -var="key_name=${TF_ENVIRONMENT_KEY}" \
+                                        -var="private_key_path=${TF_ENVIRONMENT_PATH}"
+                                """
+                            }
                         }
+                    } catch (Exception e) {
+                        echo "Failed to execute destroy prompt: ${e.message}"
                     }
                 }
             }
