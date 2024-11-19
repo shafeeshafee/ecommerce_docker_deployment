@@ -23,59 +23,49 @@ pipeline {
             }
         }
 
-        stage('Security Scan - Infrastructure') {
+        stage('Security: Code Analysis') {
+            agent { label 'build-node' }
+            steps {
+                // Create reports directory
+                sh 'mkdir -p reports'
+                
+                // Run SonarQube Analysis
+                withSonarQubeEnv('SonarQubeServer') {
+                    sh '''
+                        sonar-scanner \
+                            -Dsonar.projectKey=ecommerce-docker \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=http://localhost:9000 \
+                            -Dsonar.login=$SONAR_TOKEN
+                    '''
+                }
+                
+                // Quality Gate check
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Security: Infrastructure as Code Scan') {
             agent { label 'build-node' }
             steps {
                 sh '''#!/bin/bash
-                    # Create reports directory if it doesn't exist
-                    mkdir -p reports
-
-                    # Add security tools to PATH
-                    export PATH=$PATH:/home/ubuntu/security-venv/bin:/opt/sonar-scanner/bin
+                    # Activate virtual environment and run Checkov
+                    source venv/bin/activate
                     
-                    # Run Checkov on Terraform files
-                    source /home/ubuntu/security-venv/bin/activate
-                    checkov -d Terraform -o json > reports/checkov_report.json || true
+                    # Scan Terraform files
+                    checkov -d Terraform --framework terraform --output json > reports/checkov_report.json
+                    
                     deactivate
                 '''
-            }
-        }
-
-        stage('Security Scan - Dependencies') {
-            agent { label 'build-node' }
-            steps {
-                sh '''#!/bin/bash
-                    # Scan Python dependencies
-                    trivy fs --security-checks vuln --severity HIGH,CRITICAL -f json -o reports/trivy_dependencies.json backend/requirements.txt || true
-                    
-                    # Scan Node.js dependencies
-                    trivy fs --security-checks vuln --severity HIGH,CRITICAL -f json -o reports/trivy_node_dependencies.json frontend/package.json || true
-                '''
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            agent { label 'build-node' }
-            steps {
+                
+                // Analyze Checkov results and fail if high severity issues found
                 script {
-                    sh """
-                        curl -X POST -u admin:admin 'http://172.31.34.254:9000/api/projects/create' \
-                        -d 'name=ecommerce&project=ecommerce'
-                    """
-
-                    // run the analysis
-                    withEnv(["JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"]) {
-                        sh '''
-                            export PATH=$PATH:/opt/sonar-scanner/bin
-                            sonar-scanner -X \
-                                -Dsonar.projectKey=ecommerce \
-                                -Dsonar.sources=. \
-                                -Dsonar.host.url=http://172.31.34.254:9000 \
-                                -Dsonar.login=$SONAR_TOKEN \
-                                -Dsonar.java.binaries=. \
-                                -Dsonar.sourceEncoding=UTF-8 \
-                                -Dsonar.scm.provider=git
-                        '''
+                    def checkovReport = readJSON file: 'reports/checkov_report.json'
+                    def highSeverityCount = checkovReport.summary.failed
+                    if (highSeverityCount > 0) {
+                        error "Checkov found ${highSeverityCount} high severity issues"
                     }
                 }
             }
@@ -109,6 +99,43 @@ pipeline {
             }
         }
 
+        stage('Security: Container Scan') {
+            agent { label 'build-node' }
+            steps {
+                sh '''
+                    # Scan Backend Dockerfile and dependencies
+                    trivy config -f json -o reports/trivy_config_backend.json Dockerfile.backend
+                    trivy fs -f json -o reports/trivy_fs_backend.json backend/
+                    
+                    # Scan Frontend Dockerfile and dependencies
+                    trivy config -f json -o reports/trivy_config_frontend.json Dockerfile.frontend
+                    trivy fs -f json -o reports/trivy_fs_frontend.json frontend/
+                '''
+                
+                // Analyze Trivy results
+                script {
+                    def trivyReports = [
+                        readJSON(file: 'reports/trivy_config_backend.json'),
+                        readJSON(file: 'reports/trivy_fs_backend.json'),
+                        readJSON(file: 'reports/trivy_config_frontend.json'),
+                        readJSON(file: 'reports/trivy_fs_frontend.json')
+                    ]
+                    
+                    def highSeverityIssues = trivyReports.sum { report ->
+                        report.Results.sum { result ->
+                            result.Vulnerabilities?.count { vuln ->
+                                vuln.Severity in ['HIGH', 'CRITICAL']
+                            } ?: 0
+                        }
+                    }
+                    
+                    if (highSeverityIssues > 0) {
+                        error "Trivy found ${highSeverityIssues} high/critical severity issues"
+                    }
+                }
+            }
+        }
+
         stage('Cleanup') {
             agent { label 'build-node' }
             steps {
@@ -125,26 +152,18 @@ pipeline {
         stage('Build & Push Images') {
             agent { label 'build-node' }
             steps {
+                // login to DockerHub
+                sh 'echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin'
+                
+                // build and push backend
                 sh '''
-                    # Login to DockerHub
-                    echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin
-                    
-                    # Build backend image
                     docker build -t shafeekuralabs/ecommerce-backend:latest -f Dockerfile.backend .
-                    
-                    # Scan backend image for vulnerabilities
-                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_backend_image.json shafeekuralabs/ecommerce-backend:latest || true
-                    
-                    # Push backend image
                     docker push shafeekuralabs/ecommerce-backend:latest
-                    
-                    # Build frontend image
+                '''
+                
+                // build and push frontend
+                sh '''
                     docker build -t shafeekuralabs/ecommerce-frontend:latest -f Dockerfile.frontend .
-                    
-                    # Scan frontend image for vulnerabilities
-                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_frontend_image.json shafeekuralabs/ecommerce-frontend:latest || true
-                    
-                    # Push frontend image
                     docker push shafeekuralabs/ecommerce-frontend:latest
                 '''
             }
@@ -201,27 +220,40 @@ pipeline {
             }
         }
 
-        stage('OWASP ZAP Scan') {
+        stage('Security: Dynamic Application Scan') {
             agent { label 'build-node' }
             steps {
                 script {
                     // Wait for application to be ready
-                    sleep(time: 60, unit: 'SECONDS')
+                    sleep(time: 2, unit: 'MINUTES')
                     
-                    // Get the ALB DNS from Terraform output
+                    // Get ALB DNS from Terraform output
                     dir('Terraform') {
                         def albDns = sh(
                             script: 'terraform output -raw alb_dns_name',
                             returnStdout: true
                         ).trim()
                         
-                        // Run ZAP scan
+                        // Run OWASP ZAP scan
                         sh """
-                            /opt/zap/zap.sh -cmd \
-                                -quickurl http://${albDns} \
-                                -quickout reports/zap_scan_results.json \
-                                -quickprogress || true
+                            mkdir -p reports
+                            /opt/zap/zap-baseline.py -t http://${albDns} \
+                                -r reports/zap_report.html \
+                                -J reports/zap_report.json \
+                                -I
                         """
+                    }
+                }
+                
+                // Analyze ZAP results
+                script {
+                    def zapReport = readJSON file: 'reports/zap_report.json'
+                    def highAlerts = zapReport.site[0].alerts.count { alert ->
+                        alert.riskcode >= 3  // High or Critical severity
+                    }
+                    
+                    if (highAlerts > 0) {
+                        error "OWASP ZAP found ${highAlerts} high/critical severity issues"
                     }
                 }
             }
@@ -235,12 +267,12 @@ pipeline {
                     docker logout
                     docker system prune -f
                 '''
-                archiveArtifacts artifacts: 'reports/**/*.json', allowEmptyArchive: true
-            }
-        }
-        success {
-            node('build-node') {
-                echo "Pipeline completed successfully! Security reports are available in the artifacts."
+                
+                // Archive security reports
+                archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
+                
+                // Clean workspace
+                cleanWs()
             }
         }
     }
