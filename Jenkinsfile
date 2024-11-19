@@ -57,16 +57,26 @@ pipeline {
         stage('SonarQube Analysis') {
             agent { label 'build-node' }
             steps {
-                withEnv(["JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"]) {
-                    sh '''
-                        export PATH=$PATH:/opt/sonar-scanner/bin
-                        sonar-scanner \
-                            -Dsonar.projectKey=ecommerce \
-                            -Dsonar.sources=. \
-                            -Dsonar.host.url=http://localhost:9000 \
-                            -Dsonar.login=$SONAR_TOKEN \
-                            -Dsonar.java.binaries=.
-                    '''
+                script {
+                    sh """
+                        curl -X POST -u admin:admin 'http://172.31.34.254:9000/api/projects/create' \
+                        -d 'name=ecommerce&project=ecommerce'
+                    """
+
+                    // run the analysis
+                    withEnv(["JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"]) {
+                        sh '''
+                            export PATH=$PATH:/opt/sonar-scanner/bin
+                            sonar-scanner -X \
+                                -Dsonar.projectKey=ecommerce \
+                                -Dsonar.sources=. \
+                                -Dsonar.host.url=http://172.31.34.254:9000 \
+                                -Dsonar.login=$SONAR_TOKEN \
+                                -Dsonar.java.binaries=. \
+                                -Dsonar.sourceEncoding=UTF-8 \
+                                -Dsonar.scm.provider=git
+                        '''
+                    }
                 }
             }
         }
