@@ -6,6 +6,8 @@ pipeline {
         DJANGO_SETTINGS_MODULE = 'my_project.settings'
         PYTHONPATH = 'backend'
         WORKSPACE_VENV = './venv'
+        SONAR_TOKEN = credentials('sonar-token')
+        SONAR_PROJECT_KEY = 'ecommerce-app'
     }
 
     stages {
@@ -19,6 +21,53 @@ pipeline {
                     pip install -r backend/requirements.txt
                     deactivate
                 '''
+            }
+        }
+
+        stage('Security Scans') {
+            agent { label 'build-node' }
+            parallel {
+                stage('SonarQube Analysis') {
+                    steps {
+                        sh '''
+                            sonar-scanner \
+                              -Dsonar.projectKey=$SONAR_PROJECT_KEY \
+                              -Dsonar.sources=. \
+                              -Dsonar.host.url=http://localhost:9000 \
+                              -Dsonar.login=$SONAR_TOKEN \
+                              -Dsonar.python.coverage.reportPaths=coverage.xml \
+                              -Dsonar.exclusions=**/tests/**,**/migrations/**
+                        '''
+                    }
+                }
+                
+                stage('Checkov Infrastructure Scan') {
+                    steps {
+                        sh '''
+                            source /opt/security-tools-venv/bin/activate
+                            mkdir -p reports
+                            checkov -d Terraform -o json > reports/checkov_report.json || true
+                            deactivate
+                        '''
+                    }
+                }
+                
+                stage('Trivy Image Scan') {
+                    steps {
+                        sh '''
+                            mkdir -p reports
+                            
+                            # Scan backend image dependencies
+                            trivy fs --format json -o reports/trivy_backend_deps.json backend/requirements.txt
+                            
+                            # Scan frontend image dependencies
+                            trivy fs --format json -o reports/trivy_frontend_deps.json frontend/package.json
+                            
+                            # Scan Dockerfiles
+                            trivy config --format json -o reports/trivy_dockerfiles.json .
+                        '''
+                    }
+                }
             }
         }
 
@@ -50,19 +99,6 @@ pipeline {
             }
         }
 
-        stage('Cleanup') {
-            agent { label 'build-node' }
-            steps {
-                sh '''
-                    # Clean Docker system
-                    docker system prune -f
-                    
-                    # Clean Git repository while preserving Terraform state
-                    git clean -ffdx -e "*.tfstate*" -e ".terraform/*"
-                '''
-            }
-        }
-
         stage('Build & Push Images') {
             agent { label 'build-node' }
             steps {
@@ -72,12 +108,14 @@ pipeline {
                 // build and push backend
                 sh '''
                     docker build -t shafeekuralabs/ecommerce-backend:latest -f Dockerfile.backend .
+                    trivy image --format json -o reports/trivy_backend_image.json shafeekuralabs/ecommerce-backend:latest
                     docker push shafeekuralabs/ecommerce-backend:latest
                 '''
                 
                 // build and push frontend
                 sh '''
                     docker build -t shafeekuralabs/ecommerce-frontend:latest -f Dockerfile.frontend .
+                    trivy image --format json -o reports/trivy_frontend_image.json shafeekuralabs/ecommerce-frontend:latest
                     docker push shafeekuralabs/ecommerce-frontend:latest
                 '''
             }
@@ -133,11 +171,41 @@ pipeline {
                 }
             }
         }
+
+        stage('Dynamic Security Testing') {
+            agent { label 'build-node' }
+            steps {
+                script {
+                    // Wait for application to be ready
+                    sh 'sleep 60'  // Adjust as needed
+                    
+                    // Run OWASP ZAP scan
+                    sh '''
+                        mkdir -p reports
+                        
+                        # Get the ALB DNS name from Terraform output
+                        cd Terraform
+                        ALB_URL=$(terraform output -raw alb_dns_name)
+                        cd ..
+                        
+                        # Run ZAP scan against the application
+                        /opt/zap/zap.sh -cmd \
+                            -quickurl http://$ALB_URL \
+                            -quickprogress \
+                            -quickout reports/zap_scan_results.json
+                    '''
+                }
+            }
+        }
     }
 
     post {
         always {
             node('build-node') {
+                // Archive security reports
+                archiveArtifacts artifacts: 'reports/**/*.*', allowEmptyArchive: true
+                
+                // Cleanup
                 sh '''
                     docker logout
                     docker system prune -f
