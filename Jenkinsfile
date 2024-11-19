@@ -24,52 +24,52 @@ pipeline {
             }
         }
 
-        stage('Security Scans') {
-            agent { label 'build-node' }
-            parallel {
-                stage('SonarQube Analysis') {
-                    steps {
-                        sh '''
-                            sonar-scanner \
-                              -Dsonar.projectKey=$SONAR_PROJECT_KEY \
-                              -Dsonar.sources=. \
-                              -Dsonar.host.url=http://localhost:9000 \
-                              -Dsonar.login=$SONAR_TOKEN \
-                              -Dsonar.python.coverage.reportPaths=coverage.xml \
-                              -Dsonar.exclusions=**/tests/**,**/migrations/**
-                        '''
-                    }
+    stage('Security Scans') {
+        parallel {
+            stage('SonarQube Analysis') {
+                agent { label 'build-node' }
+                steps {
+                    sh '''
+                        sonar-scanner \
+                        -Dsonar.projectKey=$SONAR_PROJECT_KEY \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=http://localhost:9000 \
+                        -Dsonar.login=$SONAR_TOKEN \
+                        -Dsonar.python.coverage.reportPaths=coverage.xml \
+                        -Dsonar.exclusions=**/tests/**,**/migrations/**
+                    '''
                 }
-                
-                stage('Checkov Infrastructure Scan') {
-                    steps {
-                        sh '''
-                            source /opt/security-tools-venv/bin/activate
-                            mkdir -p reports
-                            checkov -d Terraform -o json > reports/checkov_report.json || true
-                            deactivate
-                        '''
-                    }
+            }
+            
+            stage('Checkov Infrastructure Scan') {
+                agent { label 'build-node' }
+                steps {
+                    sh '''
+                        source /opt/security-tools-venv/bin/activate
+                        mkdir -p reports
+                        checkov -d Terraform -o json > reports/checkov_report.json || true
+                        deactivate
+                    '''
                 }
-                
-                stage('Trivy Image Scan') {
-                    steps {
-                        sh '''
-                            mkdir -p reports
-                            
-                            # Scan backend image dependencies
-                            trivy fs --format json -o reports/trivy_backend_deps.json backend/requirements.txt
-                            
-                            # Scan frontend image dependencies
-                            trivy fs --format json -o reports/trivy_frontend_deps.json frontend/package.json
-                            
-                            # Scan Dockerfiles
-                            trivy config --format json -o reports/trivy_dockerfiles.json .
-                        '''
-                    }
+            }
+            
+            stage('Trivy Image Scan') {
+                agent { label 'build-node' }
+                steps {
+                    sh '''
+                        mkdir -p reports
+                        # Scan backend image dependencies
+                        trivy fs --format json -o reports/trivy_backend_deps.json backend/requirements.txt
+                        # Scan frontend image dependencies
+                        trivy fs --format json -o reports/trivy_frontend_deps.json frontend/package.json
+                        # Scan Dockerfiles
+                        trivy config --format json -o reports/trivy_dockerfiles.json .
+                    '''
                 }
             }
         }
+    }
+
 
         stage('Test') {
             agent { label 'build-node' }
@@ -177,7 +177,7 @@ pipeline {
             steps {
                 script {
                     // Wait for application to be ready
-                    sh 'sleep 60'  // Adjust as needed
+                    sh 'sleep 60' 
                     
                     // Run OWASP ZAP scan
                     sh '''
