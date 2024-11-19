@@ -6,6 +6,7 @@ pipeline {
         DJANGO_SETTINGS_MODULE = 'my_project.settings'
         PYTHONPATH = 'backend'
         WORKSPACE_VENV = './venv'
+        SONAR_TOKEN = credentials('sonar-token')
     }
 
     stages {
@@ -22,50 +23,40 @@ pipeline {
             }
         }
 
-        stage('Security: Static Code Analysis') {
+        stage('Security Scans') {
             agent { label 'build-node' }
             steps {
-                sh '''#!/bin/bash
-                    mkdir -p reports
-                    
-                    # Run static code analysis using SonarQube CLI
-                    sonar-scanner \
-                        -Dsonar.projectKey=ecommerce-docker \
-                        -Dsonar.sources=. \
-                        -Dsonar.host.url=http://localhost:9000 \
-                        -Dsonar.login=${SONAR_TOKEN} || true
-                        
-                    # Save SonarQube results
-                    curl -s http://localhost:9000/api/qualitygates/project_status?projectKey=ecommerce-docker > reports/sonar_report.json || true
-                '''
+                // Create reports directory
+                sh 'mkdir -p reports'
                 
-                sh '''#!/bin/bash
-                    if grep -q '"status":"ERROR"' reports/sonar_report.json; then
-                        echo "WARNING: SonarQube quality gate failed"
-                    fi
+                // Run Checkov for IaC scanning
+                sh '''
+                    cd Terraform
+                    checkov -d . -o json > ../reports/checkov_report.json
+                    cd ..
                 '''
-            }
-        }
 
-        stage('Security: Infrastructure as Code Scan') {
-            agent { label 'build-node' }
-            steps {
-                sh '''#!/bin/bash
-                    # Activate virtual environment
-                    source venv/bin/activate
+                // Run SonarQube analysis
+                withSonarQubeEnv('SonarQubeServer') {
+                    sh '''
+                        sonar-scanner \
+                            -Dsonar.projectKey=ecommerce-docker \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=http://localhost:9000 \
+                            -Dsonar.login=$SONAR_TOKEN \
+                            -Dsonar.python.coverage.reportPaths=coverage.xml \
+                            -Dsonar.exclusions=**/tests/**,**/*.json,**/*.yml
+                    '''
+                }
+                
+                // Run Trivy vulnerability scans on Dockerfiles and images
+                sh '''
+                    # Scan Dockerfiles
+                    trivy config --severity HIGH,CRITICAL -f json -o reports/trivy_dockerfile_report.json .
                     
-                    # Install Checkov if not already installed
-                    pip install checkov
-                    
-                    # Scan Terraform files and save report
-                    checkov -d Terraform --framework terraform -o json > reports/checkov_report.json || true
-                    
-                    # Check for high severity issues
-                    if grep -q '"severity": "HIGH"' reports/checkov_report.json; then
-                        echo "WARNING: Checkov found high severity issues"
-                    fi
-                    
-                    deactivate
+                    # Scan base images
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_python_image_report.json python:3.9
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_node_image_report.json node:14
                 '''
             }
         }
@@ -77,10 +68,10 @@ pipeline {
                     # Activate virtual environment
                     . $WORKSPACE_VENV/bin/activate
                     
-                    # Create test reports directory
+                    # Create test reports directory and install test dependencies
                     mkdir -p test-reports
                     
-                    # Export Python path
+                    # Export the Python path to include the backend directory
                     export PYTHONPATH=$WORKSPACE/backend:$PYTHONPATH
                     
                     # Run Django migrations
@@ -88,35 +79,25 @@ pipeline {
                     python manage.py makemigrations
                     python manage.py migrate
                     
-                    # Run tests
+                    # Run tests with proper Django settings
                     DJANGO_SETTINGS_MODULE=my_project.settings pytest account/tests.py --verbose --junit-xml ../test-reports/results.xml
                     cd ..
                     
+                    # Deactivate virtual environment
                     deactivate
                 '''
             }
         }
 
-        stage('Security: Container Scan') {
+        stage('Cleanup') {
             agent { label 'build-node' }
             steps {
-                sh '''#!/bin/bash
-                    mkdir -p reports
+                sh '''
+                    # Clean Docker system
+                    docker system prune -f
                     
-                    # Scan backend Dockerfile and dependencies
-                    trivy config -f json -o reports/trivy_config_backend.json Dockerfile.backend || true
-                    trivy fs -f json -o reports/trivy_fs_backend.json backend/ || true
-                    
-                    # Scan frontend Dockerfile and dependencies
-                    trivy config -f json -o reports/trivy_config_frontend.json Dockerfile.frontend || true
-                    trivy fs -f json -o reports/trivy_fs_frontend.json frontend/ || true
-                    
-                    # Check for critical vulnerabilities
-                    for report in reports/trivy_*.json; do
-                        if grep -q '"Severity": "CRITICAL"' "$report"; then
-                            echo "WARNING: Critical vulnerabilities found in $report"
-                        fi
-                    done
+                    # Clean Git repository while preserving Terraform state
+                    git clean -ffdx -e "*.tfstate*" -e ".terraform/*"
                 '''
             }
         }
@@ -124,14 +105,25 @@ pipeline {
         stage('Build & Push Images') {
             agent { label 'build-node' }
             steps {
+                // Login to DockerHub
+                sh 'echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin'
+                
+                // Build and push backend
                 sh '''
-                    echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin
-                    
                     docker build -t shafeekuralabs/ecommerce-backend:latest -f Dockerfile.backend .
                     docker push shafeekuralabs/ecommerce-backend:latest
-                    
+                '''
+                
+                // Build and push frontend
+                sh '''
                     docker build -t shafeekuralabs/ecommerce-frontend:latest -f Dockerfile.frontend .
                     docker push shafeekuralabs/ecommerce-frontend:latest
+                '''
+
+                // Scan built images with Trivy
+                sh '''
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_backend_report.json shafeekuralabs/ecommerce-backend:latest
+                    trivy image --severity HIGH,CRITICAL -f json -o reports/trivy_frontend_report.json shafeekuralabs/ecommerce-frontend:latest
                 '''
             }
         }
@@ -146,9 +138,11 @@ pipeline {
             steps {
                 dir('Terraform') {
                     script {
+                        // Initialize Terraform
                         sh 'terraform init'
                         
-                        def planExitCode = sh(
+                        // Run terraform plan and capture the output
+                        def planOutput = sh(
                             script: """
                                 terraform plan \
                                     -var="dockerhub_username=${DOCKER_CREDS_USR}" \
@@ -161,9 +155,10 @@ pipeline {
                             returnStatus: true
                         )
                         
-                        if (planExitCode == 0) {
+                        // Check the exit code
+                        if (planOutput == 0) {
                             echo "No infrastructure changes needed"
-                        } else if (planExitCode == 2) {
+                        } else if (planOutput == 2) {
                             echo "Infrastructure changes detected"
                             sh 'terraform apply -auto-approve tfplan'
                         } else {
@@ -184,32 +179,54 @@ pipeline {
             }
         }
 
-        stage('Security: Dynamic Application Scan') {
+        stage('Dynamic Application Security Testing') {
             agent { label 'build-node' }
             steps {
-                sh '''#!/bin/bash
-                    # Allow application to stabilize
-                    sleep 120
+                script {
+                    // Wait for application to be ready
+                    sh 'sleep 120'  // Adjust this based on your app startup time
                     
-                    # Get ALB DNS from Terraform output
-                    cd Terraform
-                    ALB_DNS=$(terraform output -raw alb_dns_name)
-                    cd ..
+                    // Run OWASP ZAP scan
+                    sh '''
+                        # Get the ALB DNS name from Terraform output
+                        cd Terraform
+                        ALB_URL=$(terraform output -raw frontend_url)
+                        cd ..
+                        
+                        # Run ZAP scan in headless mode
+                        /opt/zap/zap.sh -cmd \
+                            -quickurl $ALB_URL \
+                            -quickout reports/zap_scan_results.json \
+                            -quickprogress
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Destroy Prompt') {
+            agent { label 'build-node' }
+            steps {
+                script {
+                    def userInput = input(
+                        message: 'Would you like to destroy the infrastructure?',
+                        parameters: [
+                            booleanParam(defaultValue: false, description: 'Destroy all created infrastructure', name: 'destroy')
+                        ]
+                    )
                     
-                    # Create reports directory
-                    mkdir -p reports
-                    
-                    # Run OWASP ZAP scan
-                    /opt/zap/zap-baseline.py -t http://${ALB_DNS} \
-                        -r reports/zap_report.html \
-                        -J reports/zap_report.json \
-                        -I || true
-                    
-                    # Check for high risk findings
-                    if grep -q '"risk": "High"' reports/zap_report.json; then
-                        echo "WARNING: ZAP found high risk vulnerabilities"
-                    fi
-                '''
+                    if (userInput) {
+                        dir('Terraform') {
+                            sh """
+                                terraform destroy -auto-approve \
+                                    -var="dockerhub_username=${DOCKER_CREDS_USR}" \
+                                    -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
+                                    -var="db_password=${TF_DB_PASSWORD}" \
+                                    -var="key_name=${TF_KEY_NAME}" \
+                                    -var="private_key_path=${TF_PRIVATE_KEY_PATH}"
+                            """
+                        }
+                    }
+                }
             }
         }
     }
@@ -221,12 +238,6 @@ pipeline {
                     docker logout
                     docker system prune -f
                 '''
-                
-                // Archive reports directory
-                sh 'if [ -d "reports" ]; then tar -czf security-reports.tar.gz reports/; fi'
-                archiveArtifacts artifacts: '**/*reports.tar.gz', allowEmptyArchive: true
-                
-                cleanWs()
             }
         }
     }
