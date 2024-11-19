@@ -182,7 +182,7 @@ pipeline {
             steps {
                 script {
                     // Wait for application to be ready
-                    sh 'sleep 120'  // Adjust this based on your app startup time
+                    sh 'sleep 20'
                     
                     // Run OWASP ZAP scan
                     sh '''
@@ -200,33 +200,6 @@ pipeline {
                 }
             }
         }
-
-        stage('Terraform Destroy Prompt') {
-            agent { label 'build-node' }
-            steps {
-                script {
-                    def userInput = input(
-                        message: 'Would you like to destroy the infrastructure?',
-                        parameters: [
-                            booleanParam(defaultValue: false, description: 'Destroy all created infrastructure', name: 'destroy')
-                        ]
-                    )
-                    
-                    if (userInput) {
-                        dir('Terraform') {
-                            sh """
-                                terraform destroy -auto-approve \
-                                    -var="dockerhub_username=${DOCKER_CREDS_USR}" \
-                                    -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
-                                    -var="db_password=${TF_ENVIRONMENT_PSW}" \
-                                    -var="key_name=${TF_ENVIRONMENT_KEY}" \
-                                    -var="private_key_path=${TF_ENVIRONMENT_PATH}"
-                            """
-                        }
-                    }
-                }
-            }
-        }
     }
 
     post {
@@ -236,35 +209,6 @@ pipeline {
                     docker logout
                     docker system prune -f
                 '''
-            }
-        }
-        failure {
-            node('build-node') {
-                script {
-                    try {
-                        def userInput = input(
-                            message: 'Build failed. Would you like to destroy the infrastructure?',
-                            parameters: [
-                                booleanParam(defaultValue: false, description: 'Destroy all created infrastructure', name: 'destroy')
-                            ]
-                        )
-                        
-                        if (userInput) {
-                            dir('Terraform') {
-                                sh """
-                                    terraform destroy -auto-approve \
-                                        -var="dockerhub_username=${DOCKER_CREDS_USR}" \
-                                        -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
-                                        -var="db_password=${TF_ENVIRONMENT_PSW}" \
-                                        -var="key_name=${TF_ENVIRONMENT_KEY}" \
-                                        -var="private_key_path=${TF_ENVIRONMENT_PATH}"
-                                """
-                            }
-                        }
-                    } catch (Exception e) {
-                        echo "Failed to execute destroy prompt: ${e.message}"
-                    }
-                }
             }
         }
     }
