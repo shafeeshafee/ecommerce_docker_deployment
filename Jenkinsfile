@@ -30,12 +30,12 @@ pipeline {
                     # Create reports directory if it doesn't exist
                     mkdir -p reports
 
-                    # Activate security virtual environment
-                    source /home/ubuntu/security-venv/bin/activate
+                    # Add security tools to PATH
+                    export PATH=$PATH:/home/ubuntu/security-venv/bin:/opt/sonar-scanner/bin
                     
                     # Run Checkov on Terraform files
+                    source /home/ubuntu/security-venv/bin/activate
                     checkov -d Terraform -o json > reports/checkov_report.json || true
-                    
                     deactivate
                 '''
             }
@@ -57,14 +57,17 @@ pipeline {
         stage('SonarQube Analysis') {
             agent { label 'build-node' }
             steps {
-                sh '''
-                    export PATH=$PATH:/opt/sonar-scanner/bin
-                    sonar-scanner \
-                        -Dsonar.projectKey=ecommerce \
-                        -Dsonar.sources=. \
-                        -Dsonar.host.url=http://localhost:9000 \
-                        -Dsonar.login=$SONAR_TOKEN
-                '''
+                withEnv(["JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"]) {
+                    sh '''
+                        export PATH=$PATH:/opt/sonar-scanner/bin
+                        sonar-scanner \
+                            -Dsonar.projectKey=ecommerce \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=http://localhost:9000 \
+                            -Dsonar.login=$SONAR_TOKEN \
+                            -Dsonar.java.binaries=.
+                    '''
+                }
             }
         }
 
