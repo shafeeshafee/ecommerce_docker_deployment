@@ -6,7 +6,9 @@ pipeline {
         DJANGO_SETTINGS_MODULE = 'my_project.settings'
         PYTHONPATH = 'backend'
         WORKSPACE_VENV = './venv'
-        TF_ENVIRONMENT = credentials('terraform-environment')
+        TF_DB_PASSWORD = credentials('terraform-db-password')
+        TF_KEY_NAME = credentials('terraform-key-name')
+        TF_PRIVATE_KEY_PATH = credentials('terraform-private-key-path')
         SONAR_TOKEN = credentials('sonar-token')
     }
 
@@ -143,9 +145,9 @@ pipeline {
                                 terraform plan \
                                     -var="dockerhub_username=${DOCKER_CREDS_USR}" \
                                     -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
-                                    -var="db_password=${TF_ENVIRONMENT_PSW}" \
-                                    -var="key_name=${TF_ENVIRONMENT_KEY}" \
-                                    -var="private_key_path=${TF_ENVIRONMENT_PATH}" \
+                                    -var="db_password=${TF_DB_PASSWORD}" \
+                                    -var="key_name=${TF_KEY_NAME}" \
+                                    -var="private_key_path=${TF_PRIVATE_KEY_PATH}" \
                                     -detailed-exitcode -out=tfplan 2>&1
                             """,
                             returnStatus: true
