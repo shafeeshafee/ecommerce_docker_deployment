@@ -30,21 +30,23 @@ pipeline {
                 agent { label 'build-node' }
                 steps {
                     sh '''
+                        # Ensure SonarQube server is accessible
                         sonar-scanner \
                         -Dsonar.projectKey=$SONAR_PROJECT_KEY \
                         -Dsonar.sources=. \
-                        -Dsonar.host.url=http://localhost:9000 \
+                        -Dsonar.host.url=http://172.31.34.254:9000 \
                         -Dsonar.login=$SONAR_TOKEN \
                         -Dsonar.python.coverage.reportPaths=coverage.xml \
                         -Dsonar.exclusions=**/tests/**,**/migrations/**
                     '''
                 }
             }
-            
+
             stage('Checkov Infrastructure Scan') {
                 agent { label 'build-node' }
                 steps {
                     sh '''
+                        #!/bin/bash
                         source /opt/security-tools-venv/bin/activate
                         mkdir -p reports
                         checkov -d Terraform -o json > reports/checkov_report.json || true
@@ -52,7 +54,7 @@ pipeline {
                     '''
                 }
             }
-            
+
             stage('Trivy Image Scan') {
                 agent { label 'build-node' }
                 steps {
@@ -60,8 +62,10 @@ pipeline {
                         mkdir -p reports
                         # Scan backend image dependencies
                         trivy fs --format json -o reports/trivy_backend_deps.json backend/requirements.txt
+
                         # Scan frontend image dependencies
                         trivy fs --format json -o reports/trivy_frontend_deps.json frontend/package.json
+
                         # Scan Dockerfiles
                         trivy config --format json -o reports/trivy_dockerfiles.json .
                     '''
@@ -69,6 +73,7 @@ pipeline {
             }
         }
     }
+
 
 
         stage('Test') {
