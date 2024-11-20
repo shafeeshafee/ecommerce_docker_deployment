@@ -30,6 +30,7 @@ pipeline {
                 agent { label 'build-node' }
                 steps {
                     sh '''
+                        #!/bin/bash
                         # Ensure SonarQube server is accessible
                         sonar-scanner \
                         -Dsonar.projectKey=$SONAR_PROJECT_KEY \
@@ -45,13 +46,12 @@ pipeline {
             stage('Checkov Infrastructure Scan') {
                 agent { label 'build-node' }
                 steps {
-                    sh '''
-                        #!/bin/bash
+                    sh(script: '''
                         source /opt/security-tools-venv/bin/activate
                         mkdir -p reports
                         checkov -d Terraform -o json > reports/checkov_report.json || true
                         deactivate
-                    '''
+                    ''', shell: '/bin/bash')
                 }
             }
 
@@ -73,8 +73,6 @@ pipeline {
             }
         }
     }
-
-
 
         stage('Test') {
             agent { label 'build-node' }
