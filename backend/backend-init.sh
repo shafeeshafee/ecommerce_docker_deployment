@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 echo 'Waiting for PostgreSQL...'
 sleep 15
@@ -34,24 +35,31 @@ for i in {1..30}; do
     sleep 5
 done
 
-echo 'Running migrations for core apps...'
-python manage.py migrate auth
-python manage.py migrate admin
-python manage.py migrate contenttypes
-python manage.py migrate sessions
+if [ "$RUN_MIGRATIONS" = "true" ]; then
+    echo "Running database migrations..."
+    
+    # Run core migrations first
+    python manage.py migrate auth
+    python manage.py migrate admin
+    python manage.py migrate contenttypes
+    python manage.py migrate sessions
 
-echo 'Making migrations for custom apps...'
-python manage.py makemigrations account
-python manage.py makemigrations product
-python manage.py makemigrations payments
+    # Run app migrations
+    python manage.py migrate account
+    python manage.py migrate product
+    python manage.py migrate payments
 
-echo 'Running migrations for custom apps...'
-python manage.py migrate account
-python manage.py migrate product
-python manage.py migrate payments
+    # Dump data from SQLite and load into PostgreSQL
+    if [ -f db.sqlite3 ]; then
+        echo "Found SQLite database, transferring data..."
+        python manage.py dumpdata --database=sqlite --natural-foreign --natural-primary -e contenttypes -e auth.Permission --indent 4 > datadump.json
+        python manage.py loaddata datadump.json
+        rm -f db.sqlite3
+        rm -f datadump.json
+    fi
 
-echo 'Creating superuser...'
-python manage.py shell << END
+    # Create superuser
+    python manage.py shell << END
 from django.contrib.auth.models import User
 if not User.objects.filter(username='admin').exists():
     User.objects.create_superuser('admin', 'admin@example.com', 'admin123')
@@ -59,6 +67,10 @@ if not User.objects.filter(username='admin').exists():
 else:
     print('Superuser already exists')
 END
+
+else
+    echo "Skipping migrations..."
+fi
 
 echo 'Starting server...'
 python manage.py runserver 0.0.0.0:8000

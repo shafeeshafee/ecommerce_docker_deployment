@@ -12,6 +12,7 @@ services:
       - DB_PORT=5432
       - DJANGO_SETTINGS_MODULE=my_project.settings
       - PYTHONUNBUFFERED=1
+      - RUN_MIGRATIONS=true
     ports:
       - "8000:8000"
     restart: unless-stopped

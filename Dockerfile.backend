@@ -7,20 +7,20 @@ WORKDIR /app
 # Copy the backend directory into the container
 COPY backend/ /app/
 
-# Create init directory and copy initialization script
-RUN mkdir -p /app/init
-COPY Terraform/modules/compute/init/backend-init.sh /app/init/
-RUN chmod +x /app/init/backend-init.sh
-
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install django-environ psycopg2-binary
 
-# Run migrations
-RUN python manage.py makemigrations account payments product
+# Run makemigrations
+RUN python manage.py makemigrations account \
+    && python manage.py makemigrations payments \
+    && python manage.py makemigrations product
+
+# Make backend init script executable
+RUN chmod +x /app/backend-init.sh
 
 # Expose port 8000
 EXPOSE 8000
 
-# Set the command to run the application
-CMD ["/bin/bash", "/app/init/backend-init.sh"]
+# Set the entrypoint
+ENTRYPOINT ["./backend-init.sh"]
