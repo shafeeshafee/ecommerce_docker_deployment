@@ -24,55 +24,54 @@ pipeline {
             }
         }
 
-    stage('Security Scans') {
-        parallel {
-            stage('SonarQube Analysis') {
-                agent { label 'build-node' }
-                steps {
-                    sh '''
-                        #!/bin/bash
-                        # Ensure SonarQube server is accessible
-                        sonar-scanner \
-                        -Dsonar.projectKey=$SONAR_PROJECT_KEY \
-                        -Dsonar.sources=. \
-                        -Dsonar.host.url=http://172.31.34.254:9000 \
-                        -Dsonar.login=$SONAR_TOKEN \
-                        -Dsonar.python.coverage.reportPaths=coverage.xml \
-                        -Dsonar.exclusions=**/tests/**,**/migrations/**
-                    '''
+        stage('Security Scans') {
+            parallel {
+                stage('SonarQube Analysis') {
+                    agent { label 'build-node' }
+                    steps {
+                        sh '''#!/bin/bash
+                            # Ensure SonarQube server is accessible
+                            sonar-scanner \
+                            -Dsonar.projectKey=$SONAR_PROJECT_KEY \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=http://172.31.34.254:9000 \
+                            -Dsonar.login=$SONAR_TOKEN \
+                            -Dsonar.python.coverage.reportPaths=coverage.xml \
+                            -Dsonar.exclusions=**/tests/**,**/migrations/**
+                        '''
+                    }
                 }
-            }
 
-            stage('Checkov Infrastructure Scan') {
-                agent { label 'build-node' }
-                steps {
-                    sh(script: '''
-                        source /opt/security-tools-venv/bin/activate
-                        mkdir -p reports
-                        checkov -d Terraform -o json > reports/checkov_report.json || true
-                        deactivate
-                    ''', shell: '/bin/bash')
+                stage('Checkov Infrastructure Scan') {
+                    agent { label 'build-node' }
+                    steps {
+                        sh '''#!/bin/bash
+                            source /opt/security-tools-venv/bin/activate
+                            mkdir -p reports
+                            checkov -d Terraform -o json > reports/checkov_report.json || true
+                            deactivate
+                        '''
+                    }
                 }
-            }
 
-            stage('Trivy Image Scan') {
-                agent { label 'build-node' }
-                steps {
-                    sh '''
-                        mkdir -p reports
-                        # Scan backend image dependencies
-                        trivy fs --format json -o reports/trivy_backend_deps.json backend/requirements.txt
+                stage('Trivy Image Scan') {
+                    agent { label 'build-node' }
+                    steps {
+                        sh '''#!/bin/bash
+                            mkdir -p reports
+                            # Scan backend image dependencies
+                            trivy fs --format json -o reports/trivy_backend_deps.json backend/requirements.txt
 
-                        # Scan frontend image dependencies
-                        trivy fs --format json -o reports/trivy_frontend_deps.json frontend/package.json
+                            # Scan frontend image dependencies
+                            trivy fs --format json -o reports/trivy_frontend_deps.json frontend/package.json
 
-                        # Scan Dockerfiles
-                        trivy config --format json -o reports/trivy_dockerfiles.json .
-                    '''
+                            # Scan Dockerfiles
+                            trivy config --format json -o reports/trivy_dockerfiles.json .
+                        '''
+                    }
                 }
             }
         }
-    }
 
         stage('Test') {
             agent { label 'build-node' }
@@ -80,22 +79,22 @@ pipeline {
                 sh '''#!/bin/bash
                     # Activate virtual environment
                     . $WORKSPACE_VENV/bin/activate
-                    
+
                     # Create test reports directory and install test dependencies
                     mkdir -p test-reports
-                    
+
                     # Export the Python path to include the backend directory
                     export PYTHONPATH=$WORKSPACE/backend:$PYTHONPATH
-                    
+
                     # Run Django migrations
                     cd backend
                     python manage.py makemigrations
                     python manage.py migrate
-                    
+
                     # Run tests with proper Django settings
                     DJANGO_SETTINGS_MODULE=my_project.settings pytest account/tests.py --verbose --junit-xml ../test-reports/results.xml
                     cd ..
-                    
+
                     # Deactivate virtual environment
                     deactivate
                 '''
@@ -105,18 +104,20 @@ pipeline {
         stage('Build & Push Images') {
             agent { label 'build-node' }
             steps {
-                // login to DockerHub
-                sh 'echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin'
-                
-                // build and push backend
-                sh '''
+                // Login to DockerHub
+                sh '''#!/bin/bash
+                    echo ${DOCKER_CREDS_PSW} | docker login -u ${DOCKER_CREDS_USR} --password-stdin
+                '''
+
+                // Build and push backend
+                sh '''#!/bin/bash
                     docker build -t shafeekuralabs/ecommerce-backend:latest -f Dockerfile.backend .
                     trivy image --format json -o reports/trivy_backend_image.json shafeekuralabs/ecommerce-backend:latest
                     docker push shafeekuralabs/ecommerce-backend:latest
                 '''
-                
-                // build and push frontend
-                sh '''
+
+                // Build and push frontend
+                sh '''#!/bin/bash
                     docker build -t shafeekuralabs/ecommerce-frontend:latest -f Dockerfile.frontend .
                     trivy image --format json -o reports/trivy_frontend_image.json shafeekuralabs/ecommerce-frontend:latest
                     docker push shafeekuralabs/ecommerce-frontend:latest
@@ -136,10 +137,10 @@ pipeline {
                     script {
                         // Initialize Terraform
                         sh 'terraform init'
-                        
+
                         // Run terraform plan and capture the output
                         def planOutput = sh(
-                            script: """
+                            script: '''#!/bin/bash
                                 terraform plan \
                                     -var="dockerhub_username=${DOCKER_CREDS_USR}" \
                                     -var="dockerhub_password=${DOCKER_CREDS_PSW}" \
@@ -147,10 +148,10 @@ pipeline {
                                     -var="key_name=${TF_KEY_NAME}" \
                                     -var="private_key_path=${TF_PRIVATE_KEY_PATH}" \
                                     -detailed-exitcode -out=tfplan 2>&1
-                            """,
+                            ''',
                             returnStatus: true
                         )
-                        
+
                         // Check the exit code
                         if (planOutput == 0) {
                             echo "No infrastructure changes needed"
@@ -166,7 +167,7 @@ pipeline {
             post {
                 success {
                     dir('Terraform') {
-                        sh '''
+                        sh '''#!/bin/bash
                             mkdir -p terraform-states
                             cp terraform.tfstate "terraform-states/terraform-$(date +%Y%m%d-%H%M%S).tfstate"
                         '''
@@ -180,17 +181,17 @@ pipeline {
             steps {
                 script {
                     // Wait for application to be ready
-                    sh 'sleep 60' 
-                    
+                    sh 'sleep 60'
+
                     // Run OWASP ZAP scan
-                    sh '''
+                    sh '''#!/bin/bash
                         mkdir -p reports
-                        
+
                         # Get the ALB DNS name from Terraform output
                         cd Terraform
                         ALB_URL=$(terraform output -raw alb_dns_name)
                         cd ..
-                        
+
                         # Run ZAP scan against the application
                         /opt/zap/zap.sh -cmd \
                             -quickurl http://$ALB_URL \
@@ -207,9 +208,9 @@ pipeline {
             node('build-node') {
                 // Archive security reports
                 archiveArtifacts artifacts: 'reports/**/*.*', allowEmptyArchive: true
-                
+
                 // Cleanup
-                sh '''
+                sh '''#!/bin/bash
                     docker logout
                     docker system prune -f
                 '''
