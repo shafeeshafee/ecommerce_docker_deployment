@@ -1,4 +1,4 @@
-# Kura Labs Deployment 6: Containerized E-commerce Application
+# Containerized E-commerce Application
 
 ## Purpose
 
