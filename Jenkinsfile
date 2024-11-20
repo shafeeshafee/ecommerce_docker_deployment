@@ -46,7 +46,10 @@ pipeline {
                     agent { label 'build-node' }
                     steps {
                         sh '''#!/bin/bash
-                            source /opt/security-tools-venv/bin/activate
+                            python3 -m venv checkov-venv
+                            source checkov-venv/bin/activate
+                            pip install --upgrade pip
+                            pip install checkov
                             mkdir -p reports
                             checkov -d Terraform -o json > reports/checkov_report.json || true
                             deactivate
