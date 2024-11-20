@@ -10,10 +10,8 @@ services:
       - DB_USER=${db_username}
       - DB_PASSWORD=${db_password}
       - DB_PORT=5432
+      - DJANGO_SETTINGS_MODULE=my_project.settings
       - PYTHONUNBUFFERED=1
-      - DJANGO_SUPERUSER_USERNAME=admin
-      - DJANGO_SUPERUSER_EMAIL=admin@example.com
-      - DJANGO_SUPERUSER_PASSWORD=admin123
     ports:
       - "8000:8000"
     restart: unless-stopped
