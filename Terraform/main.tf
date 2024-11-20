@@ -57,18 +57,3 @@ module "compute" {
   instance_type_app     = var.instance_type_app
   nat_gateway_id        = module.network.nat_gateway_id
 }
-
-
-module "monitoring" {
-  source   = "./modules/monitoring"
-  key_name = var.key_name
-  app_private_ips = [
-    module.compute.app_az1_private_ip,
-    module.compute.app_az2_private_ip
-  ]
-  custom_vpc_cidr       = var.vpc_cidr
-  peering_connection_id = module.network.peering_connection_id
-  private_key_path      = var.private_key_path
-
-  depends_on = [module.compute]
-}
